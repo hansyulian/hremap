@@ -1,0 +1,184 @@
+default_layer: default
+
+layers:
+  base_shift:
+    mappings:
+      # media controls when any shift is held
+      - trigger: ["C"]
+        action:
+          type: key
+          keys: ["NEXT_TRACK"]
+      - trigger: ["Z"]
+        action:
+          type: key
+          keys: ["PREV_TRACK"]
+      - trigger: ["X"]
+        action:
+          type: key
+          keys: ["PLAY_PAUSE"]
+
+  default:
+    mappings:
+      # simple key remap
+      - trigger: ["A"]
+        action:
+          type: key
+          keys: ["K"]
+
+      # modifier combo remap
+      - trigger: ["CTRL", "A"]
+        action:
+          type: key
+          keys: ["CTRL", "C"]
+
+      # alt combo
+      - trigger: ["ALT", "A"]
+        action:
+          type: key
+          keys: ["HOME"]
+
+      # ctrl+shift combo
+      - trigger: ["CTRL", "SHIFT", "A"]
+        action:
+          type: key
+          keys: ["CTRL", "SHIFT", "END"]
+
+
+      # key to mouse button
+      - trigger: ["F13"]
+        action:
+          type: key
+          keys: ["BTN_LEFT"]
+
+      # shift layer - hold F20 to activate
+      - trigger: ["F20"]
+        action:
+          type: layer
+          layer: default_shift
+          mode: shift
+
+      # toggle layer - press F19 to toggle
+      - trigger: ["F19"]
+        action:
+          type: layer
+          layer: default_shift
+          mode: toggle
+
+      # macro once - press F7, types "hello" once
+      - trigger: ["F7"]
+        action:
+          type: macro
+          mode: once
+          steps:
+            - keys: ["H"]
+              delay_ms: 50
+            - keys: ["E"]
+              delay_ms: 50
+            - keys: ["L"]
+              delay_ms: 50
+            - keys: ["L"]
+              delay_ms: 50
+            - keys: ["O"]
+              delay_ms: 50
+
+      # macro hold - hold F8, keeps typing "a"
+      - trigger: ["F8"]
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["A"]
+              delay_ms: 100
+
+      # macro toggle - press F9 to start/stop typing "ab"
+      - trigger: ["F9"]
+        action:
+          type: macro
+          mode: toggle
+          steps:
+            - keys: ["A"]
+              delay_ms: 100
+            - keys: ["B"]
+              delay_ms: 100
+
+  default_shift:
+    parent: base_shift
+    mappings:
+      # WASD navigation
+      - trigger: ["W"]
+        action:
+          type: key
+          keys: ["UP"]
+      - trigger: ["S"]
+        action:
+          type: key
+          keys: ["DOWN"]
+      - trigger: ["A"]
+        action:
+          type: key
+          keys: ["LEFT"]
+      - trigger: ["D"]
+        action:
+          type: key
+          keys: ["RIGHT"]
+      # number row to F-keys
+      - trigger: ["1"]
+        action:
+          type: key
+          keys: ["F1"]
+      - trigger: ["2"]
+        action:
+          type: key
+          keys: ["F2"]
+      - trigger: ["3"]
+        action:
+          type: key
+          keys: ["F3"]
+      # ctrl combo in shift layer
+      - trigger: ["CTRL", "W"]
+        action:
+          type: key
+          keys: ["CTRL", "HOME"]
+
+  vscode:
+    parent: default
+    mappings:
+      # override A in vscode
+      - trigger: ["A"]
+        action:
+          type: key
+          keys: ["B"]
+      # debug shortcuts
+      - trigger: ["F7"]
+        action:
+          type: key
+          keys: ["F5"]
+      - trigger: ["F8"]
+        action:
+          type: key
+          keys: ["F10"]
+      - trigger: ["F9"]
+        action:
+          type: key
+          keys: ["F11"]
+
+  firefox:
+    parent: default
+    mappings:
+      # override A in firefox
+      - trigger: ["A"]
+        action:
+          type: key
+          keys: ["Y"]
+      # ctrl+shift+tab remapped to F13
+      - trigger: ["F13"]
+        action:
+          type: key
+          keys: ["CTRL", "SHIFT", "TAB"]
+
+profiles:
+  - wm_classes: ["code"]
+    layer: vscode
+
+  - wm_classes: ["org.mozilla.firefox"]
+    layer: firefox
