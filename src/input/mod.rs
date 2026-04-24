@@ -148,6 +148,17 @@ pub async fn run(
 ) -> Result<()> {
     let devices = evdev::enumerate()
         .filter_map(|(_, device)| {
+            let name = device.name().unwrap_or("").to_lowercase();
+            
+            // Filter by specific hardware names
+            let is_target_hw = config.device_names.iter().any(|target| {
+                name.contains(&target.to_lowercase())
+            });
+            if !is_target_hw {
+                return None;
+            }
+
+            // Maintain your existing capability check
             let supported = device.supported_keys();
             match supported {
                 Some(keys) => {

@@ -7,6 +7,7 @@ use evdev::Key;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct RawConfig {
+    pub device_names: Vec<String>,
     pub default_layer: String,
     pub layers: HashMap<String, RawLayer>,
     #[serde(default)]
@@ -167,6 +168,7 @@ pub struct Config {
     pub layers: HashMap<String, ResolvedLayer>,
     pub profile_map: HashMap<String, String>,
     pub default_layer: String,
+    pub device_names: Vec<String>,
 }
 
 // ─── Key parsing ──────────────────────────────────────────────────────────────
@@ -409,5 +411,6 @@ pub fn load(path: &str) -> Result<Config> {
         layers,
         profile_map,
         default_layer: raw.default_layer,
+        device_names: raw.device_names,
     })
 }
