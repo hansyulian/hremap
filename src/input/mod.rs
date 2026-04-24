@@ -1,3 +1,4 @@
+use crate::actions;
 use anyhow::Result;
 use evdev::{AbsInfo, AbsoluteAxisType, EventType, InputEvent, Key, UinputAbsSetup};
 use futures_util::StreamExt;
@@ -6,11 +7,10 @@ use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
-use crate::actions;
 
 use crate::config::{
-    Action, Config, KeyCombo, LayerMode, MacroMode, ResolvedLayer,
-    compute_modifier_index, is_modifier_key,
+    compute_modifier_index, is_modifier_key, Action, Config, KeyCombo, LayerMode, MacroMode,
+    ResolvedLayer,
 };
 use crate::watcher::gnome::WindowInfo;
 
@@ -109,14 +109,12 @@ fn spawn_macro(
             MacroMode::Once => {
                 run_macro_once(&output, &steps, &token_clone).await;
             }
-            MacroMode::Hold | MacroMode::Toggle => {
-                loop {
-                    if token_clone.is_cancelled() {
-                        break;
-                    }
-                    run_macro_once(&output, &steps, &token_clone).await;
+            MacroMode::Hold | MacroMode::Toggle => loop {
+                if token_clone.is_cancelled() {
+                    break;
                 }
-            }
+                run_macro_once(&output, &steps, &token_clone).await;
+            },
         }
     });
     token
@@ -142,18 +140,16 @@ fn update_base_layer<'a>(
     }
 }
 
-pub async fn run(
-    mut window_rx: watch::Receiver<Option<WindowInfo>>,
-    config: Config,
-) -> Result<()> {
+pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
     let devices = evdev::enumerate()
         .filter_map(|(_, device)| {
             let name = device.name().unwrap_or("").to_lowercase();
-            
+
             // Filter by specific hardware names
-            let is_target_hw = config.device_names.iter().any(|target| {
-                name.contains(&target.to_lowercase())
-            });
+            let is_target_hw = config
+                .device_names
+                .iter()
+                .any(|target| name.contains(&target.to_lowercase()));
             if !is_target_hw {
                 return None;
             }
@@ -180,32 +176,107 @@ pub async fn run(
     let output = evdev::uinput::VirtualDeviceBuilder::new()?
         .name("hremap-virtual")
         .with_keys(&evdev::AttributeSet::from_iter([
-            Key::KEY_A, Key::KEY_B, Key::KEY_C, Key::KEY_D, Key::KEY_E,
-            Key::KEY_F, Key::KEY_G, Key::KEY_H, Key::KEY_I, Key::KEY_J,
-            Key::KEY_K, Key::KEY_L, Key::KEY_M, Key::KEY_N, Key::KEY_O,
-            Key::KEY_P, Key::KEY_Q, Key::KEY_R, Key::KEY_S, Key::KEY_T,
-            Key::KEY_U, Key::KEY_V, Key::KEY_W, Key::KEY_X, Key::KEY_Y,
-            Key::KEY_Z, Key::KEY_1, Key::KEY_2, Key::KEY_3, Key::KEY_4,
-            Key::KEY_5, Key::KEY_6, Key::KEY_7, Key::KEY_8, Key::KEY_9,
-            Key::KEY_0, Key::KEY_ENTER, Key::KEY_ESC, Key::KEY_BACKSPACE,
-            Key::KEY_TAB, Key::KEY_SPACE, Key::KEY_LEFTCTRL, Key::KEY_LEFTSHIFT,
-            Key::KEY_LEFTALT, Key::KEY_RIGHTCTRL, Key::KEY_RIGHTSHIFT,
-            Key::KEY_RIGHTALT, Key::KEY_LEFTMETA, Key::KEY_F1, Key::KEY_F2,
-            Key::KEY_F3, Key::KEY_F4, Key::KEY_F5, Key::KEY_F6, Key::KEY_F7,
-            Key::KEY_F8, Key::KEY_F9, Key::KEY_F10, Key::KEY_F11, Key::KEY_F12,
-            Key::KEY_F13, Key::KEY_F14, Key::KEY_F15, Key::KEY_F16,
-            Key::KEY_F17, Key::KEY_F18, Key::KEY_F19, Key::KEY_F20,
-            Key::KEY_UP, Key::KEY_DOWN, Key::KEY_LEFT, Key::KEY_RIGHT,
-            Key::KEY_HOME, Key::KEY_END, Key::KEY_DELETE, Key::KEY_INSERT,
-            Key::KEY_PAGEUP, Key::KEY_PAGEDOWN, Key::KEY_CAPSLOCK,
-            Key::KEY_MINUS, Key::KEY_EQUAL, Key::KEY_LEFTBRACE,
-            Key::KEY_RIGHTBRACE, Key::KEY_BACKSLASH, Key::KEY_SEMICOLON,
-            Key::KEY_APOSTROPHE, Key::KEY_GRAVE, Key::KEY_COMMA,
-            Key::KEY_DOT, Key::KEY_SLASH,
-            Key::KEY_PLAYPAUSE, Key::KEY_NEXTSONG, Key::KEY_PREVIOUSSONG,
-            Key::KEY_VOLUMEUP, Key::KEY_VOLUMEDOWN, Key::KEY_MUTE,
-            Key::BTN_LEFT, Key::BTN_RIGHT, Key::BTN_MIDDLE,
-            Key::BTN_SIDE, Key::BTN_EXTRA,
+            Key::KEY_A,
+            Key::KEY_B,
+            Key::KEY_C,
+            Key::KEY_D,
+            Key::KEY_E,
+            Key::KEY_F,
+            Key::KEY_G,
+            Key::KEY_H,
+            Key::KEY_I,
+            Key::KEY_J,
+            Key::KEY_K,
+            Key::KEY_L,
+            Key::KEY_M,
+            Key::KEY_N,
+            Key::KEY_O,
+            Key::KEY_P,
+            Key::KEY_Q,
+            Key::KEY_R,
+            Key::KEY_S,
+            Key::KEY_T,
+            Key::KEY_U,
+            Key::KEY_V,
+            Key::KEY_W,
+            Key::KEY_X,
+            Key::KEY_Y,
+            Key::KEY_Z,
+            Key::KEY_1,
+            Key::KEY_2,
+            Key::KEY_3,
+            Key::KEY_4,
+            Key::KEY_5,
+            Key::KEY_6,
+            Key::KEY_7,
+            Key::KEY_8,
+            Key::KEY_9,
+            Key::KEY_0,
+            Key::KEY_ENTER,
+            Key::KEY_ESC,
+            Key::KEY_BACKSPACE,
+            Key::KEY_TAB,
+            Key::KEY_SPACE,
+            Key::KEY_LEFTCTRL,
+            Key::KEY_LEFTSHIFT,
+            Key::KEY_LEFTALT,
+            Key::KEY_RIGHTCTRL,
+            Key::KEY_RIGHTSHIFT,
+            Key::KEY_RIGHTALT,
+            Key::KEY_LEFTMETA,
+            Key::KEY_F1,
+            Key::KEY_F2,
+            Key::KEY_F3,
+            Key::KEY_F4,
+            Key::KEY_F5,
+            Key::KEY_F6,
+            Key::KEY_F7,
+            Key::KEY_F8,
+            Key::KEY_F9,
+            Key::KEY_F10,
+            Key::KEY_F11,
+            Key::KEY_F12,
+            Key::KEY_F13,
+            Key::KEY_F14,
+            Key::KEY_F15,
+            Key::KEY_F16,
+            Key::KEY_F17,
+            Key::KEY_F18,
+            Key::KEY_F19,
+            Key::KEY_F20,
+            Key::KEY_UP,
+            Key::KEY_DOWN,
+            Key::KEY_LEFT,
+            Key::KEY_RIGHT,
+            Key::KEY_HOME,
+            Key::KEY_END,
+            Key::KEY_DELETE,
+            Key::KEY_INSERT,
+            Key::KEY_PAGEUP,
+            Key::KEY_PAGEDOWN,
+            Key::KEY_CAPSLOCK,
+            Key::KEY_MINUS,
+            Key::KEY_EQUAL,
+            Key::KEY_LEFTBRACE,
+            Key::KEY_RIGHTBRACE,
+            Key::KEY_BACKSLASH,
+            Key::KEY_SEMICOLON,
+            Key::KEY_APOSTROPHE,
+            Key::KEY_GRAVE,
+            Key::KEY_COMMA,
+            Key::KEY_DOT,
+            Key::KEY_SLASH,
+            Key::KEY_PLAYPAUSE,
+            Key::KEY_NEXTSONG,
+            Key::KEY_PREVIOUSSONG,
+            Key::KEY_VOLUMEUP,
+            Key::KEY_VOLUMEDOWN,
+            Key::KEY_MUTE,
+            Key::BTN_LEFT,
+            Key::BTN_RIGHT,
+            Key::BTN_MIDDLE,
+            Key::BTN_SIDE,
+            Key::BTN_EXTRA,
         ]))?
         .with_relative_axes(&evdev::AttributeSet::from_iter([
             evdev::RelativeAxisType::REL_X,
@@ -226,10 +297,34 @@ pub async fn run(
         .build()?;
 
     let output = Arc::new(Mutex::new(output));
+    let mut mouse_grabbed = false;
 
-    let mut streams = devices
-        .into_iter()
-        .filter_map(|mut device| {
+    let mut streams = evdev::enumerate()
+        .filter_map(|(_, mut device)| {
+            let supported = match device.supported_keys() {
+                Some(k) => k,
+                None => return None,
+            };
+
+            let has_keyboard = supported.contains(Key::KEY_A);
+            let has_mouse = supported.contains(Key::BTN_LEFT);
+
+            if !has_keyboard && !has_mouse {
+                return None;
+            }
+
+            // only grab one mouse device
+            if has_mouse && !has_keyboard {
+                if mouse_grabbed {
+                    tracing::info!(
+                        "Skipping additional mouse: {}",
+                        device.name().unwrap_or("unknown")
+                    );
+                    return None;
+                }
+                mouse_grabbed = true;
+            }
+
             let name = device.name().unwrap_or("unknown").to_string();
             match device.grab() {
                 Ok(_) => {
@@ -252,7 +347,9 @@ pub async fn run(
 
     tracing::info!("Grabbed {} devices", streams.len());
 
-    let default_layer = config.layers.get(&config.default_layer)
+    let default_layer = config
+        .layers
+        .get(&config.default_layer)
         .ok_or_else(|| anyhow::anyhow!("Default layer '{}' not found", config.default_layer))?;
 
     let mut state = InputState::new(default_layer);
@@ -309,7 +406,10 @@ pub async fn run(
                         Action::Key(combo) => {
                             emit_combo(&output, &combo, value).await?;
                         }
-                        Action::Layer { layer: layer_name, mode:layer_mode } => match layer_mode {
+                        Action::Layer {
+                            layer: layer_name,
+                            mode: layer_mode,
+                        } => match layer_mode {
                             LayerMode::Shift => {
                                 if value == 1 {
                                     if let Some(l) = config.layers.get(&layer_name) {
@@ -323,7 +423,9 @@ pub async fn run(
                             }
                             LayerMode::Toggle => {
                                 if value == 1 {
-                                    if state.shift_layer.map(|l| l.name.as_str()) == Some(layer_name.as_str()) {
+                                    if state.shift_layer.map(|l| l.name.as_str())
+                                        == Some(layer_name.as_str())
+                                    {
                                         tracing::info!("Toggle layer off: {}", layer_name);
                                         state.shift_layer = None;
                                     } else if let Some(l) = config.layers.get(&layer_name) {
@@ -349,7 +451,10 @@ pub async fn run(
                                 actions::launch(&command);
                             }
                         }
-                        Action::Macro { mode:macro_mode, steps } => match macro_mode {
+                        Action::Macro {
+                            mode: macro_mode,
+                            steps,
+                        } => match macro_mode {
                             MacroMode::Once => {
                                 if value == 1 {
                                     stop_macro(&mut state);
@@ -371,7 +476,8 @@ pub async fn run(
                                     if state.macro_cancel.is_some() {
                                         stop_macro(&mut state);
                                     } else {
-                                        let token = spawn_macro(output.clone(), steps, MacroMode::Toggle);
+                                        let token =
+                                            spawn_macro(output.clone(), steps, MacroMode::Toggle);
                                         state.macro_cancel = Some(token);
                                     }
                                 }
