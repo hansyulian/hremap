@@ -1,7 +1,7 @@
+mod actions;
 mod config;
 mod input;
 mod watcher;
-mod actions;
 
 use tokio::sync::watch;
 
@@ -10,7 +10,13 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     tracing::info!("hremap starting...");
 
-    let cfg = config::load("config.yaml")?;
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "config.yaml".to_string());
+
+    tracing::info!("Loading config from: {}", config_path);
+
+    let cfg = config::load(&config_path)?;
     tracing::info!(
         "Config loaded: {} layers, {} profiles",
         cfg.layers.len(),

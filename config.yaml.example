@@ -1,105 +1,56 @@
 default_layer: default
+# device_names: ["g502", "keychron k3 max keyboard"]
+device_names: []
 
 layers:
+
+  # ─── Base Shift ─────────────────────────────────────────────────────────────
+  # Shared parent for all gaming shift layers
   base_shift:
     mappings:
-      # media controls when any shift is held
       - trigger: ["C"]
         action:
           type: key
           keys: ["NEXT_TRACK"]
+ 
       - trigger: ["Z"]
         action:
           type: key
           keys: ["PREV_TRACK"]
+ 
       - trigger: ["X"]
         action:
           type: key
           keys: ["PLAY_PAUSE"]
-
   default:
     mappings:
-      # simple key remap
-      - trigger: ["A"]
-        action:
-          type: key
-          keys: ["K"]
-
-      # modifier combo remap
-      - trigger: ["CTRL", "A"]
-        action:
-          type: key
-          keys: ["CTRL", "C"]
-
-      # alt combo
-      - trigger: ["ALT", "A"]
-        action:
-          type: key
-          keys: ["HOME"]
-
-      # ctrl+shift combo
-      - trigger: ["CTRL", "SHIFT", "A"]
-        action:
-          type: key
-          keys: ["CTRL", "SHIFT", "END"]
-
-
-      # key to mouse button
-      - trigger: ["F13"]
-        action:
-          type: key
-          keys: ["BTN_LEFT"]
-
-      # shift layer - hold F20 to activate
+      # toggle layer - press F20 to toggle
       - trigger: ["F20"]
         action:
           type: layer
           layer: default_shift
           mode: shift
-
-      # toggle layer - press F19 to toggle
-      - trigger: ["F19"]
+          
+      - trigger: ["F21"]
         action:
-          type: layer
-          layer: default_shift
-          mode: toggle
+          type: key
+          keys: ["F12"]
 
-      # macro once - press F7, types "hello" once
-      - trigger: ["F7"]
+      - trigger: ["F22"]
         action:
-          type: macro
-          mode: once
-          steps:
-            - keys: ["H"]
-              delay_ms: 50
-            - keys: ["E"]
-              delay_ms: 50
-            - keys: ["L"]
-              delay_ms: 50
-            - keys: ["L"]
-              delay_ms: 50
-            - keys: ["O"]
-              delay_ms: 50
+          type: key
+          keys: ["F5"]
 
-      # macro hold - hold F8, keeps typing "a"
-      - trigger: ["F8"]
+      - trigger: ["F23"]
         action:
-          type: macro
-          mode: hold
-          steps:
-            - keys: ["A"]
-              delay_ms: 100
+          type: key
+          keys: ["CTRL", "SHIFT", "TAB"]
 
-      # macro toggle - press F9 to start/stop typing "ab"
-      - trigger: ["F9"]
+      - trigger: ["F24"]
         action:
-          type: macro
-          mode: toggle
-          steps:
-            - keys: ["A"]
-              delay_ms: 100
-            - keys: ["B"]
-              delay_ms: 100
+          type: key
+          keys: ["CTRL", "TAB"]
+
 
   default_shift:
     parent: base_shift
@@ -121,64 +72,478 @@ layers:
         action:
           type: key
           keys: ["RIGHT"]
-      # number row to F-keys
-      - trigger: ["1"]
-        action:
-          type: key
-          keys: ["F1"]
-      - trigger: ["2"]
-        action:
-          type: key
-          keys: ["F2"]
-      - trigger: ["3"]
-        action:
-          type: key
-          keys: ["F3"]
-      # ctrl combo in shift layer
-      - trigger: ["CTRL", "W"]
-        action:
-          type: key
-          keys: ["CTRL", "HOME"]
 
-  vscode:
-    parent: default
+      - trigger: ["MFORWARD"]
+        action:
+          type: key
+          keys: ["PLAY_PAUSE"]
+
+      - trigger: ["MBACK"]
+        action:
+          type: key
+          keys: ["MUTE"]
+      - trigger: ["CTRL","BTN_RIGHT"]
+        action:
+          type: launch
+          command: "flameshot gui"
+
+      - trigger: ["F21"]
+        action:
+          type: key
+          keys: ["NEXT_TRACK"]
+
+      - trigger: ["F22"]
+        action:
+          type: key
+          keys: ["PREV_TRACK"]
+
+      - trigger: ["F23"]
+        action:
+          type: key
+          keys: ["META", "LEFT"]
+
+      - trigger: ["F24"]
+        action:
+          type: key
+          keys: ["META", "RIGHT"]
+      - trigger: ["BTN_LEFT"]
+        action:
+          type: key
+          keys: ["CTRL", "F4"]
+      - trigger: ["Q"]
+        action:
+          type: key
+          keys: ["HOME"]
+      - trigger: ["E"]
+        action:
+          type: key
+          keys: ["END"]
+      - trigger: ["R"]
+        action:
+          type: key
+          keys: ["DELETE"]
+      - trigger: ["F"]
+        action:
+          type: key
+          keys: ["BACKSPACE"]
+
+  # ─── Gaming Base ────────────────────────────────────────────────────────────
+  gaming_base:
     mappings:
-      # override A in vscode
-      - trigger: ["A"]
+      - trigger: ["F23"]          # Mouse Tilt Left → [
         action:
           type: key
-          keys: ["B"]
-      # debug shortcuts
-      - trigger: ["F7"]
+          keys: ["LEFTBRACKET"]
+ 
+      - trigger: ["F24"]          # Mouse Tilt Right → ]
         action:
           type: key
-          keys: ["F5"]
-      - trigger: ["F8"]
+          keys: ["RIGHTBRACKET"]
+ 
+      - trigger: ["F20"]          # Mouse Shift → Gaming Base Shift
+        action:
+          type: layer
+          layer: gaming_base_shift
+          mode: shift
+ 
+      - trigger: ["F14"]          # Foot Center → Gaming Base Shift
+        action:
+          type: layer
+          layer: gaming_base_shift
+          mode: shift
+ 
+      - trigger: ["BTN_EXTRA"]    # Mouse Forward → semicolon
         action:
           type: key
-          keys: ["F10"]
-      - trigger: ["F9"]
+          keys: ["SEMICOLON"]
+ 
+      - trigger: ["BTN_SIDE"]     # Mouse Back → apostrophe
+        action:
+          type: key
+          keys: ["APOSTROPHE"]
+ 
+      - trigger: ["F21"]          # Mouse DPI Up → minus
+        action:
+          type: key
+          keys: ["MINUS"]
+ 
+      - trigger: ["F22"]          # Mouse DPI Down → equal
+        action:
+          type: key
+          keys: ["EQUAL"]
+ 
+      - trigger: ["PAUSE"]        # Keyboard G1 → ESC
+        action:
+          type: key
+          keys: ["ESC"]
+ 
+      - trigger: ["F13"]          # Foot Left → Play/Pause
+        action:
+          type: key
+          keys: ["PLAY_PAUSE"]
+ 
+      - trigger: ["F15"]          # Foot Right → ESC
+        action:
+          type: key
+          keys: ["ESC"]
+ 
+      - trigger: ["F9"]           # Keyboard G3 → App Volume Toggle
+        action:
+          type: app_volume
+          direction: mute
+ 
+  # ─── Gaming Base Shift ──────────────────────────────────────────────────────
+  gaming_base_shift:
+    parent: base_shift
+    mappings:
+      - trigger: ["F23"]          # Mouse Tilt Left → backslash
+        action:
+          type: key
+          keys: ["BACKSLASH"]
+ 
+      - trigger: ["F24"]          # Mouse Tilt Right → numpad multiply
+        action:
+          type: key
+          keys: ["NUMPAD_MULTIPLY"]
+ 
+      - trigger: ["BTN_EXTRA"]    # Mouse Forward → M
+        action:
+          type: key
+          keys: ["M"]
+ 
+      - trigger: ["F21"]          # Mouse DPI Up → period
+        action:
+          type: key
+          keys: ["PERIOD"]
+ 
+      - trigger: ["F22"]          # Mouse DPI Down → slash
+        action:
+          type: key
+          keys: ["SLASH"]
+ 
+      - trigger: ["F9"]           # Keyboard G6 → ESC
+        action:
+          type: key
+          keys: ["ESC"]
+ 
+      - trigger: ["BTN_LEFT"]     # Left Click → F11
         action:
           type: key
           keys: ["F11"]
-
-  firefox:
-    parent: default
+ 
+      - trigger: ["BTN_RIGHT"]    # Right Click → F12
+        action:
+          type: key
+          keys: ["F12"]
+ 
+      # WHEEL_UP → App Volume Up
+      # WHEEL_DOWN → App Volume Down
+      # Wire these via compositor scroll bindings or scroll remapping
+ 
+  # ─── MMORPG ─────────────────────────────────────────────────────────────────
+  mmorpg:
+    parent: gaming_base
     mappings:
-      # override A in firefox
-      - trigger: ["A"]
+      - trigger: ["F21"]
         action:
           type: key
-          keys: ["Y"]
-      # ctrl+shift+tab remapped to F13
-      - trigger: ["F13"]
+          keys: ["1"]
+      - trigger: ["F22"]
         action:
           type: key
-          keys: ["CTRL", "SHIFT", "TAB"]
+          keys: ["2"]
+      - trigger: ["BTN_EXTRA"]
+        action:
+          type: key
+          keys: ["3"]
+      - trigger: ["BTN_SIDE"]
+        action:
+          type: key
+          keys: ["4"]
+      # - trigger: ["F21"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["1"]
+      #         delay_ms: 5
+      #       - keys: ["1"]
+      #         up: true
+      #         delay_ms: 250
 
+      # - trigger: ["CTRL", "F21"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["CTRL", "1"]
+      #         delay_ms: 5
+      #       - keys: ["CTRL", "1"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["ALT", "F21"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["ALT", "1"]
+      #         delay_ms: 5
+      #       - keys: ["ALT", "1"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["F22"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["2"]
+      #         delay_ms: 5
+      #       - keys: ["2"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["CTRL", "F22"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["CTRL", "2"]
+      #         delay_ms: 5
+      #       - keys: ["CTRL", "2"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["ALT", "F22"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["ALT", "2"]
+      #         delay_ms: 5
+      #       - keys: ["ALT", "2"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["BTN_EXTRA"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["3"]
+      #         delay_ms: 5
+      #       - keys: ["3"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["CTRL", "BTN_EXTRA"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["CTRL", "3"]
+      #         delay_ms: 5
+      #       - keys: ["CTRL", "3"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["ALT", "BTN_EXTRA"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["ALT", "3"]
+      #         delay_ms: 5
+      #       - keys: ["ALT", "3"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["BTN_SIDE"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["4"]
+      #         delay_ms: 5
+      #       - keys: ["4"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["CTRL", "BTN_SIDE"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["CTRL", "4"]
+      #         delay_ms: 5
+      #       - keys: ["CTRL", "4"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["ALT", "BTN_SIDE"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["ALT", "4"]
+      #         delay_ms: 5
+      #       - keys: ["ALT", "4"]
+      #         up: true
+      #         delay_ms: 250
+ 
+      - trigger: ["F20"]          # Mouse Shift → MMORPG Shift
+        action:
+          type: layer
+          layer: mmorpg_shift
+          mode: shift
+ 
+      - trigger: ["F14"]          # Foot Center → MMORPG Shift
+        action:
+          type: layer
+          layer: mmorpg_shift
+          mode: shift
+ 
+      - trigger: ["GRAVE"]        # Backtick → ESC
+        action:
+          type: key
+          keys: ["ESC"]
+ 
+      - trigger: ["F19"]          # Keychron Extra 4 → Enter
+        action:
+          type: key
+          keys: ["ENTER"]
+ 
+  # ─── MMORPG Shift ───────────────────────────────────────────────────────────
+  mmorpg_shift:
+    parent: gaming_base_shift
+    mappings:
+      - trigger: ["F21"]          # Mouse DPI Up → semicolon
+        action:
+          type: key
+          keys: ["SEMICOLON"]
+ 
+      - trigger: ["F22"]          # Mouse DPI Down → Hold Left Click
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["BTN_LEFT"]
+              delay_ms: 10
+            - keys: ["BTN_LEFT"]
+              up: true
+              delay_ms: 100
+ 
+      - trigger: ["BTN_LEFT"]
+        action:
+          type: key
+          keys: ["5"]
+      # - trigger: ["BTN_LEFT"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["5"]
+      #         delay_ms: 5
+      #       - keys: ["5"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["CTRL", "BTN_LEFT"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["CTRL", "5"]
+      #         delay_ms: 5
+      #       - keys: ["CTRL", "5"]
+      #         up: true
+      #         delay_ms: 250
+
+      # - trigger: ["ALT", "BTN_LEFT"]
+      #   action:
+      #     type: macro
+      #     mode: hold
+      #     steps:
+      #       - keys: ["ALT", "5"]
+      #         delay_ms: 5
+      #       - keys: ["ALT", "5"]
+      #         up: true
+      #         delay_ms: 250
+ 
+      - trigger: ["BTN_RIGHT"]    # Right Click → Hold 6
+        action:
+          type: key
+          keys: ["6"]
+ 
+      - trigger: ["SPACE"]        # Space → Hold Space
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["SPACE"]
+              delay_ms: 5
+            - keys: ["SPACE"]
+              up: true
+              delay_ms: 50
+ 
+      - trigger: ["F9"]           # Keyboard G6 → ESC
+        action:
+          type: key
+          keys: ["ESC"]
+ 
+      - trigger: ["1"]            # Number row → Numpad
+        action:
+          type: key
+          keys: ["NUMPAD_1"]
+ 
+      - trigger: ["2"]
+        action:
+          type: key
+          keys: ["NUMPAD_2"]
+ 
+      - trigger: ["3"]
+        action:
+          type: key
+          keys: ["NUMPAD_3"]
+ 
+      - trigger: ["4"]
+        action:
+          type: key
+          keys: ["NUMPAD_4"]
+ 
+      - trigger: ["5"]
+        action:
+          type: key
+          keys: ["NUMPAD_5"]
+ 
+      - trigger: ["6"]
+        action:
+          type: key
+          keys: ["NUMPAD_6"]
+ 
+      - trigger: ["7"]
+        action:
+          type: key
+          keys: ["NUMPAD_7"]
+ 
+      - trigger: ["8"]
+        action:
+          type: key
+          keys: ["NUMPAD_8"]
+ 
+      - trigger: ["9"]
+        action:
+          type: key
+          keys: ["NUMPAD_9"]          
+      
+      
 profiles:
-  - wm_classes: ["code"]
-    layer: vscode
+  - wm_classes: ["gw2-64.exe"]
+    layer: mmorpg
+# profiles:
+#   - wm_classes: ["code"]
+#     layer: programming
 
-  - wm_classes: ["org.mozilla.firefox"]
-    layer: firefox
+#   - wm_classes: ["org.mozilla.firefox"]
+#     layer: firefox

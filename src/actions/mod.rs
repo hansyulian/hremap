@@ -1,7 +1,6 @@
 // src/actions/mod.rs
-use anyhow::Result;
-use std::process::Command;
 use crate::config::VolumeDirection;
+use std::process::Command;
 
 // ─── Launch ──────────────────────────────────────────────────────────────────
 
@@ -17,20 +16,14 @@ pub fn launch(command: &str) {
 
 pub fn system_volume(direction: &VolumeDirection, amount: f32) {
     let arg = match direction {
-        VolumeDirection::Up   => format!("{}%+", (amount * 100.0) as u32),
+        VolumeDirection::Up => format!("{}%+", (amount * 100.0) as u32),
         VolumeDirection::Down => format!("{}%-", (amount * 100.0) as u32),
         VolumeDirection::Mute => "toggle".to_string(),
     };
 
     let (cmd, args): (&str, Vec<&str>) = match direction {
-        VolumeDirection::Mute => (
-            "wpctl",
-            vec!["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"],
-        ),
-        _ => (
-            "wpctl",
-            vec!["set-volume", "@DEFAULT_AUDIO_SINK@", &arg],
-        ),
+        VolumeDirection::Mute => ("wpctl", vec!["set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"]),
+        _ => ("wpctl", vec!["set-volume", "@DEFAULT_AUDIO_SINK@", &arg]),
     };
 
     run_command(cmd, &args);
@@ -58,21 +51,25 @@ pub fn app_volume(direction: &VolumeDirection, amount: f32, pid: Option<u32>) {
 
     let index_str = sink_index.to_string();
     let amount_str = match direction {
-        VolumeDirection::Up   => format!("{}%+", (amount * 100.0) as u32),
+        VolumeDirection::Up => format!("{}%+", (amount * 100.0) as u32),
         VolumeDirection::Down => format!("{}%-", (amount * 100.0) as u32),
         VolumeDirection::Mute => "toggle".to_string(),
     };
 
     let args: Vec<&str> = match direction {
         VolumeDirection::Mute => vec!["set-sink-input-mute", &index_str, "toggle"],
-        _                     => vec!["set-sink-input-volume", &index_str, &amount_str],
+        _ => vec!["set-sink-input-volume", &index_str, &amount_str],
     };
 
     run_command("pactl", &args);
 }
 
 fn find_sink_input_by_pid(pid: u32) -> Option<u32> {
-    let output = match Command::new("pactl").arg("list").arg("sink-inputs").output() {
+    let output = match Command::new("pactl")
+        .arg("list")
+        .arg("sink-inputs")
+        .output()
+    {
         Ok(o) => o,
         Err(e) => {
             tracing::warn!("pactl not found or failed: {}", e);
@@ -114,7 +111,7 @@ fn find_sink_input_by_pid(pid: u32) -> Option<u32> {
 fn run_command(cmd: &str, args: &[&str]) {
     tracing::info!("Running: {} {}", cmd, args.join(" "));
     match Command::new(cmd).args(args).spawn() {
-        Ok(_)  => {}
+        Ok(_) => {}
         Err(e) => tracing::warn!("Command '{}' failed: {} (is it installed?)", cmd, e),
     }
 }
