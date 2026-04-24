@@ -445,7 +445,38 @@ fn resolve_layer(
         let slot = mappings
             .entry(key_code)
             .or_insert_with(|| std::array::from_fn(|_| None));
-        slot[modifier_index] = Some(action);
+        slot[modifier_index] = Some(action.clone());
+
+        // Auto-expand Action::Key with no modifier trigger into all modifier combinations
+        // that aren't already explicitly mapped, prepending held modifiers to the output.
+        if modifier_index == 0 {
+            if let Action::Key(ref combo) = action {
+                for mod_bits in 1..MODIFIER_COUNT {
+                    if slot[mod_bits].is_none() {
+                        // build the extra modifiers from the bitmask
+                        let mut extra: Vec<Key> = vec![];
+                        if mod_bits & 1 != 0 {
+                            extra.push(Key::KEY_LEFTSHIFT);
+                        }
+                        if mod_bits & 2 != 0 {
+                            extra.push(Key::KEY_LEFTCTRL);
+                        }
+                        if mod_bits & 4 != 0 {
+                            extra.push(Key::KEY_LEFTALT);
+                        }
+
+                        // prepend extra mods, then the combo's own modifiers, then the key
+                        let mut new_modifiers = extra;
+                        new_modifiers.extend_from_slice(&combo.modifiers);
+
+                        slot[mod_bits] = Some(Action::Key(KeyCombo {
+                            modifiers: new_modifiers,
+                            key: combo.key,
+                        }));
+                    }
+                }
+            }
+        }
     }
 
     cache.insert(name.to_string(), mappings.clone());
