@@ -19,6 +19,28 @@ info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error()   { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
 
+# ─── Parse arguments ─────────────────────────────────────────────────────────
+REPLACE_CONFIG=false
+
+for arg in "$@"; do
+    case $arg in
+        --replace-config)
+            REPLACE_CONFIG=true
+            ;;
+        --help|-h)
+            echo "Usage: ./install.sh [OPTIONS]"
+            echo ""
+            echo "Options:"
+            echo "  --replace-config   Replace existing config with config.yaml from project root"
+            echo "  --help             Show this help message"
+            exit 0
+            ;;
+        *)
+            error "Unknown argument: $arg. Use --help for usage."
+            ;;
+    esac
+done
+
 # ─── Check we're in the right directory ──────────────────────────────────────
 if [ ! -f "Cargo.toml" ]; then
     error "Please run this script from the hremap project root directory"
@@ -40,17 +62,29 @@ info "Binary installed"
 
 # ─── Set up config directory ─────────────────────────────────────────────────
 mkdir -p "$CONFIG_DIR"
-if [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
+
+copy_config() {
     if [ -f "$CONFIG_FILE" ]; then
-        info "Copying config to $CONFIG_DIR/$CONFIG_FILE..."
+        info "Copying config.yaml to $CONFIG_DIR/$CONFIG_FILE..."
         cp "$CONFIG_FILE" "$CONFIG_DIR/$CONFIG_FILE"
         info "Config installed"
+    elif [ -f "config.yaml.example" ]; then
+        info "config.yaml not found, copying config.yaml.example to $CONFIG_DIR/$CONFIG_FILE..."
+        cp "config.yaml.example" "$CONFIG_DIR/$CONFIG_FILE"
+        warn "Config installed from example — please edit $CONFIG_DIR/$CONFIG_FILE before use"
     else
-        warn "No config.yaml found in project root — skipping config copy"
+        warn "No config.yaml or config.yaml.example found — skipping config copy"
         warn "Please manually create $CONFIG_DIR/$CONFIG_FILE"
     fi
+}
+
+if [ "$REPLACE_CONFIG" = true ]; then
+    info "Replacing config (--replace-config flag set)..."
+    copy_config
+elif [ ! -f "$CONFIG_DIR/$CONFIG_FILE" ]; then
+    copy_config
 else
-    warn "Config already exists at $CONFIG_DIR/$CONFIG_FILE — skipping (not overwriting)"
+    info "Config already exists at $CONFIG_DIR/$CONFIG_FILE — skipping (use --replace-config to overwrite)"
 fi
 
 # ─── Add user to input group if not already ──────────────────────────────────
