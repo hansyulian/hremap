@@ -16,10 +16,12 @@ use crate::watcher::gnome::WindowInfo;
 
 type SharedOutput = Arc<Mutex<evdev::uinput::VirtualDevice>>;
 
+// ─── Input State ─────────────────────────────────────────────────────────────
+
 pub struct InputState<'a> {
     pub current_layer: &'a ResolvedLayer,
     pub shift_layer: Option<&'a ResolvedLayer>,
-    pub shift_trigger_key: Option<u16>, // key that activated the shift
+    pub shift_trigger_key: Option<u16>,
     pub held_modifiers: HashSet<u16>,
     pub macro_cancel: Option<CancellationToken>,
 }
@@ -40,6 +42,44 @@ impl<'a> InputState<'a> {
     }
 }
 
+// ─── Device filtering ────────────────────────────────────────────────────────
+
+fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
+    let name = device.name().unwrap_or("").to_lowercase();
+
+    // if device_names specified, must match at least one
+    if !device_names.is_empty() {
+        if !device_names
+            .iter()
+            .any(|n| name.contains(&n.to_lowercase()))
+        {
+            return false;
+        }
+    }
+
+    // must have keyboard keys or mouse buttons
+    let supported = match device.supported_keys() {
+        Some(keys) => keys,
+        None => return false,
+    };
+
+    if !supported.contains(Key::KEY_A) && !supported.contains(Key::BTN_LEFT) {
+        return false;
+    }
+
+    // exclude touchpads — they have ABS_MT multitouch axes
+    if let Some(abs) = device.supported_absolute_axes() {
+        if abs.contains(evdev::AbsoluteAxisType::ABS_MT_POSITION_X) {
+            tracing::info!("Skipping touchpad: {}", device.name().unwrap_or("unknown"));
+            return false;
+        }
+    }
+
+    true
+}
+
+// ─── Output helpers ───────────────────────────────────────────────────────────
+
 async fn emit_combo(output: &SharedOutput, combo: &KeyCombo, value: i32) -> Result<()> {
     let mut out = output.lock().await;
     if value == 1 {
@@ -55,6 +95,8 @@ async fn emit_combo(output: &SharedOutput, combo: &KeyCombo, value: i32) -> Resu
     }
     Ok(())
 }
+
+// ─── Macro helpers ────────────────────────────────────────────────────────────
 
 async fn run_macro_once(
     output: &SharedOutput,
@@ -86,6 +128,7 @@ async fn run_macro_once(
         }
     }
 
+    // always release held keys
     for combo in pressed.iter().rev() {
         if let Err(e) = emit_combo(output, combo, 0).await {
             tracing::error!("Macro release error: {}", e);
@@ -122,6 +165,8 @@ fn spawn_macro(
     token
 }
 
+// ─── Layer helpers ────────────────────────────────────────────────────────────
+
 fn update_base_layer<'a>(
     config: &'a Config,
     state: &mut InputState<'a>,
@@ -142,40 +187,10 @@ fn update_base_layer<'a>(
     }
 }
 
-pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
-    let devices = evdev::enumerate()
-        .filter_map(|(_, device)| {
-            let name = device.name().unwrap_or("").to_lowercase();
+// ─── Build virtual output device ─────────────────────────────────────────────
 
-            // Filter by specific hardware names
-            let is_target_hw = config
-                .device_names
-                .iter()
-                .any(|target| name.contains(&target.to_lowercase()));
-            if !is_target_hw {
-                return None;
-            }
-
-            // Maintain your existing capability check
-            let supported = device.supported_keys();
-            match supported {
-                Some(keys) => {
-                    if keys.contains(Key::KEY_A) || keys.contains(Key::BTN_LEFT) {
-                        Some(device)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if devices.is_empty() {
-        anyhow::bail!("No keyboard or mouse devices found");
-    }
-
-    let output = evdev::uinput::VirtualDeviceBuilder::new()?
+fn build_output_device() -> Result<evdev::uinput::VirtualDevice> {
+    Ok(evdev::uinput::VirtualDeviceBuilder::new()?
         .name("hremap-virtual")
         .with_keys(&evdev::AttributeSet::from_iter([
             Key::KEY_A,
@@ -296,37 +311,17 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
             AbsoluteAxisType::ABS_Y,
             AbsInfo::new(0, 0, 65535, 0, 0, 1),
         ))?
-        .build()?;
+        .build()?)
+}
 
-    let output = Arc::new(Mutex::new(output));
-    let mut mouse_grabbed = false;
+// ─── Grab input devices ───────────────────────────────────────────────────────
 
-    let mut streams = evdev::enumerate()
+fn grab_devices(device_names: &[String]) -> Vec<evdev::EventStream> {
+    evdev::enumerate()
         .filter_map(|(_, mut device)| {
-            let supported = match device.supported_keys() {
-                Some(k) => k,
-                None => return None,
-            };
-
-            let has_keyboard = supported.contains(Key::KEY_A);
-            let has_mouse = supported.contains(Key::BTN_LEFT);
-
-            if !has_keyboard && !has_mouse {
+            if !should_grab(&device, device_names) {
                 return None;
             }
-
-            // only grab one mouse device
-            if has_mouse && !has_keyboard {
-                if mouse_grabbed {
-                    tracing::info!(
-                        "Skipping additional mouse: {}",
-                        device.name().unwrap_or("unknown")
-                    );
-                    return None;
-                }
-                mouse_grabbed = true;
-            }
-
             let name = device.name().unwrap_or("unknown").to_string();
             match device.grab() {
                 Ok(_) => {
@@ -345,7 +340,110 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
                 }
             }
         })
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+// ─── Action handler ───────────────────────────────────────────────────────────
+
+async fn handle_action<'a>(
+    action: Action,
+    value: i32,
+    key: Key,
+    output: &SharedOutput,
+    state: &mut InputState<'a>,
+    config: &'a Config,
+    window_rx: &watch::Receiver<Option<WindowInfo>>,
+) -> Result<()> {
+    match action {
+        Action::Key(combo) => {
+            emit_combo(output, &combo, value).await?;
+        }
+        Action::Layer {
+            layer: layer_name,
+            mode,
+        } => match mode {
+            LayerMode::Shift => {
+                if value == 1 {
+                    if let Some(l) = config.layers.get(&layer_name) {
+                        tracing::info!("Shift layer on: {}", layer_name);
+                        state.shift_layer = Some(l);
+                        state.shift_trigger_key = Some(key.code());
+                    }
+                } else if value == 0 {
+                    tracing::info!("Shift layer off");
+                    state.shift_layer = None;
+                    state.shift_trigger_key = None;
+                }
+            }
+            LayerMode::Toggle => {
+                if value == 1 {
+                    if state.shift_layer.map(|l| l.name.as_str()) == Some(layer_name.as_str()) {
+                        tracing::info!("Toggle layer off: {}", layer_name);
+                        state.shift_layer = None;
+                    } else if let Some(l) = config.layers.get(&layer_name) {
+                        tracing::info!("Toggle layer on: {}", layer_name);
+                        state.shift_layer = Some(l);
+                    }
+                }
+            }
+        },
+        Action::Volume { direction, amount } => {
+            if value == 1 {
+                actions::system_volume(&direction, amount);
+            }
+        }
+        Action::AppVolume { direction, amount } => {
+            if value == 1 {
+                let pid = window_rx.borrow().as_ref().map(|w| w.pid);
+                actions::app_volume(&direction, amount, pid);
+            }
+        }
+        Action::Launch { command } => {
+            if value == 1 {
+                actions::launch(&command);
+            }
+        }
+        Action::Macro { mode, steps } => match mode {
+            MacroMode::Once => {
+                if value == 1 {
+                    stop_macro(state);
+                    let token = spawn_macro(output.clone(), steps, MacroMode::Once);
+                    state.macro_cancel = Some(token);
+                }
+            }
+            MacroMode::Hold => {
+                if value == 1 {
+                    stop_macro(state);
+                    let token = spawn_macro(output.clone(), steps, MacroMode::Hold);
+                    state.macro_cancel = Some(token);
+                } else if value == 0 {
+                    stop_macro(state);
+                }
+            }
+            MacroMode::Toggle => {
+                if value == 1 {
+                    if state.macro_cancel.is_some() {
+                        stop_macro(state);
+                    } else {
+                        let token = spawn_macro(output.clone(), steps, MacroMode::Toggle);
+                        state.macro_cancel = Some(token);
+                    }
+                }
+            }
+        },
+    }
+    Ok(())
+}
+
+// ─── Main event loop ──────────────────────────────────────────────────────────
+
+pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
+    let output = Arc::new(Mutex::new(build_output_device()?));
+    let mut streams = grab_devices(&config.device_names);
+
+    if streams.is_empty() {
+        anyhow::bail!("No keyboard or mouse devices found");
+    }
 
     tracing::info!("Grabbed {} devices", streams.len());
 
@@ -363,150 +461,78 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
             result
         };
 
-        match event {
-            Some(Ok(ev)) => {
-                if ev.event_type() != EventType::KEY {
-                    let mut out = output.lock().await;
-                    out.emit(&[ev])?;
-                    continue;
-                }
-
-                let key = Key::new(ev.code());
-                let value = ev.value();
-
-                // track held modifiers
-                if is_modifier_key(key) {
-                    if value == 1 {
-                        state.held_modifiers.insert(key.code());
-                    } else if value == 0 {
-                        state.held_modifiers.remove(&key.code());
-                    }
-                    // always pass through modifier keys
-                    let mut out = output.lock().await;
-                    out.emit(&[ev])?;
-                    continue;
-                }
-
-                // skip repeat events
-                if value == 2 {
-                    let mut out = output.lock().await;
-                    out.emit(&[ev])?;
-                    continue;
-                }
-
-                // update base layer when window changes
-                if window_rx.has_changed()? {
-                    let active_window = window_rx.borrow_and_update().clone();
-                    update_base_layer(&config, &mut state, &active_window);
-                }
-
-                let modifier_index = compute_modifier_index(&state.held_modifiers);
-                if value == 0 {
-                    if state.shift_trigger_key == Some(key.code()) {
-                        tracing::info!("Shift trigger released, popping shift layer");
-                        state.shift_layer = None;
-                        state.shift_trigger_key = None;
-                        continue; // swallow the key release
-                    }
-                }
-                let layer = state.active_layer();
-
-                match layer.lookup(key.code(), modifier_index) {
-                    Some(action) => match action.clone() {
-                        Action::Key(combo) => {
-                            emit_combo(&output, &combo, value).await?;
-                        }
-                        Action::Layer {
-                            layer: layer_name,
-                            mode: layer_mode,
-                        } => match layer_mode {
-                            LayerMode::Shift => {
-                                if value == 1 {
-                                    if let Some(l) = config.layers.get(&layer_name) {
-                                        tracing::info!("Shift layer on: {}", layer_name);
-                                        state.shift_layer = Some(l);
-                                        state.shift_trigger_key = Some(key.code());
-                                        // store trigger
-                                    }
-                                } else if value == 0 {
-                                    tracing::info!("Shift layer off");
-                                    state.shift_layer = None;
-                                    state.shift_trigger_key = None;
-                                }
-                            }
-                            LayerMode::Toggle => {
-                                if value == 1 {
-                                    if state.shift_layer.map(|l| l.name.as_str())
-                                        == Some(layer_name.as_str())
-                                    {
-                                        tracing::info!("Toggle layer off: {}", layer_name);
-                                        state.shift_layer = None;
-                                    } else if let Some(l) = config.layers.get(&layer_name) {
-                                        tracing::info!("Toggle layer on: {}", layer_name);
-                                        state.shift_layer = Some(l);
-                                    }
-                                }
-                            }
-                        },
-                        Action::Volume { direction, amount } => {
-                            if value == 1 {
-                                actions::system_volume(&direction, amount);
-                            }
-                        }
-                        Action::AppVolume { direction, amount } => {
-                            if value == 1 {
-                                let pid = window_rx.borrow().as_ref().map(|w| w.pid);
-                                actions::app_volume(&direction, amount, pid);
-                            }
-                        }
-                        Action::Launch { command } => {
-                            if value == 1 {
-                                actions::launch(&command);
-                            }
-                        }
-                        Action::Macro {
-                            mode: macro_mode,
-                            steps,
-                        } => match macro_mode {
-                            MacroMode::Once => {
-                                if value == 1 {
-                                    stop_macro(&mut state);
-                                    let token = spawn_macro(output.clone(), steps, MacroMode::Once);
-                                    state.macro_cancel = Some(token);
-                                }
-                            }
-                            MacroMode::Hold => {
-                                if value == 1 {
-                                    stop_macro(&mut state);
-                                    let token = spawn_macro(output.clone(), steps, MacroMode::Hold);
-                                    state.macro_cancel = Some(token);
-                                } else if value == 0 {
-                                    stop_macro(&mut state);
-                                }
-                            }
-                            MacroMode::Toggle => {
-                                if value == 1 {
-                                    if state.macro_cancel.is_some() {
-                                        stop_macro(&mut state);
-                                    } else {
-                                        let token =
-                                            spawn_macro(output.clone(), steps, MacroMode::Toggle);
-                                        state.macro_cancel = Some(token);
-                                    }
-                                }
-                            }
-                        },
-                    },
-                    None => {
-                        let mut out = output.lock().await;
-                        out.emit(&[ev])?;
-                    }
-                }
-            }
+        let ev = match event {
+            Some(Ok(ev)) => ev,
             Some(Err(e)) => {
                 tracing::error!("Input error: {}", e);
+                continue;
             }
-            None => {}
+            None => continue,
+        };
+
+        // forward non-key events (mouse movement, scroll) — suppress EV_ABS
+        if ev.event_type() != EventType::KEY {
+            if ev.event_type() != EventType::ABSOLUTE {
+                let mut out = output.lock().await;
+                out.emit(&[ev])?;
+            }
+            continue;
+        }
+
+        let key = Key::new(ev.code());
+        let value = ev.value();
+
+        // track and pass through modifier keys
+        if is_modifier_key(key) {
+            match value {
+                1 => {
+                    state.held_modifiers.insert(key.code());
+                }
+                0 => {
+                    state.held_modifiers.remove(&key.code());
+                }
+                _ => {}
+            }
+            let mut out = output.lock().await;
+            out.emit(&[ev])?;
+            continue;
+        }
+
+        // skip repeat events
+        if value == 2 {
+            let mut out = output.lock().await;
+            out.emit(&[ev])?;
+            continue;
+        }
+
+        // update base layer on window change
+        if window_rx.has_changed()? {
+            let active_window = window_rx.borrow_and_update().clone();
+            update_base_layer(&config, &mut state, &active_window);
+        }
+
+        // handle shift trigger release
+        if value == 0 && state.shift_trigger_key == Some(key.code()) {
+            tracing::info!("Shift trigger released");
+            state.shift_layer = None;
+            state.shift_trigger_key = None;
+            continue;
+        }
+
+        let modifier_index = compute_modifier_index(&state.held_modifiers);
+        let action = state
+            .active_layer()
+            .lookup(key.code(), modifier_index)
+            .cloned();
+
+        match action {
+            Some(action) => {
+                handle_action(action, value, key, &output, &mut state, &config, &window_rx).await?;
+            }
+            None => {
+                let mut out = output.lock().await;
+                out.emit(&[ev])?;
+            }
         }
     }
 }
