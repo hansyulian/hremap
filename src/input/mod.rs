@@ -19,6 +19,7 @@ type SharedOutput = Arc<Mutex<evdev::uinput::VirtualDevice>>;
 pub struct InputState<'a> {
     pub current_layer: &'a ResolvedLayer,
     pub shift_layer: Option<&'a ResolvedLayer>,
+    pub shift_trigger_key: Option<u16>, // key that activated the shift
     pub held_modifiers: HashSet<u16>,
     pub macro_cancel: Option<CancellationToken>,
 }
@@ -28,6 +29,7 @@ impl<'a> InputState<'a> {
         Self {
             current_layer: default_layer,
             shift_layer: None,
+            shift_trigger_key: None,
             held_modifiers: HashSet::new(),
             macro_cancel: None,
         }
@@ -399,6 +401,14 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
                 }
 
                 let modifier_index = compute_modifier_index(&state.held_modifiers);
+                if value == 0 {
+                    if state.shift_trigger_key == Some(key.code()) {
+                        tracing::info!("Shift trigger released, popping shift layer");
+                        state.shift_layer = None;
+                        state.shift_trigger_key = None;
+                        continue; // swallow the key release
+                    }
+                }
                 let layer = state.active_layer();
 
                 match layer.lookup(key.code(), modifier_index) {
@@ -415,10 +425,13 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
                                     if let Some(l) = config.layers.get(&layer_name) {
                                         tracing::info!("Shift layer on: {}", layer_name);
                                         state.shift_layer = Some(l);
+                                        state.shift_trigger_key = Some(key.code());
+                                        // store trigger
                                     }
                                 } else if value == 0 {
                                     tracing::info!("Shift layer off");
                                     state.shift_layer = None;
+                                    state.shift_trigger_key = None;
                                 }
                             }
                             LayerMode::Toggle => {
