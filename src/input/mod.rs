@@ -1,20 +1,23 @@
 use crate::actions;
 use anyhow::Result;
-use evdev::{AbsInfo, AbsoluteAxisType, EventType, InputEvent, Key, UinputAbsSetup};
+use evdev::{EventType, InputEvent, Key};
 use futures_util::StreamExt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
+mod utils;
 
 use crate::config::{
-    compute_modifier_index, is_modifier_key, Action, Config, KeyCombo, LayerMode, MacroMode,
-    ResolvedLayer,
+    compute_modifier_index, is_modifier_key, Action, Config, KeyCombo, LayerMode, LookupResult,
+    MacroMode, ResolvedLayer,
 };
 use crate::watcher::gnome::WindowInfo;
 
 type SharedOutput = Arc<Mutex<evdev::uinput::VirtualDevice>>;
+type SharedModifiers = Arc<RwLock<HashSet<u16>>>;
 
 // ─── Input State ─────────────────────────────────────────────────────────────
 
@@ -22,8 +25,9 @@ pub struct InputState<'a> {
     pub current_layer: &'a ResolvedLayer,
     pub shift_layer: Option<&'a ResolvedLayer>,
     pub shift_trigger_key: Option<u16>,
-    pub held_modifiers: HashSet<u16>,
+    pub held_modifiers: SharedModifiers,
     pub macro_cancel: Option<CancellationToken>,
+    pub pending_releases: HashMap<u16, Action>,
 }
 
 impl<'a> InputState<'a> {
@@ -32,8 +36,9 @@ impl<'a> InputState<'a> {
             current_layer: default_layer,
             shift_layer: None,
             shift_trigger_key: None,
-            held_modifiers: HashSet::new(),
+            held_modifiers: Arc::new(RwLock::new(HashSet::new())),
             macro_cancel: None,
+            pending_releases: HashMap::new(),
         }
     }
 
@@ -47,7 +52,6 @@ impl<'a> InputState<'a> {
 fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
     let name = device.name().unwrap_or("").to_lowercase();
 
-    // if device_names specified, must match at least one
     if !device_names.is_empty() {
         if !device_names
             .iter()
@@ -57,7 +61,6 @@ fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
         }
     }
 
-    // must have keyboard keys or mouse buttons
     let supported = match device.supported_keys() {
         Some(keys) => keys,
         None => return false,
@@ -67,7 +70,6 @@ fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
         return false;
     }
 
-    // exclude touchpads — they have ABS_MT multitouch axes
     if let Some(abs) = device.supported_absolute_axes() {
         if abs.contains(evdev::AbsoluteAxisType::ABS_MT_POSITION_X) {
             tracing::info!("Skipping touchpad: {}", device.name().unwrap_or("unknown"));
@@ -80,17 +82,38 @@ fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
-async fn emit_combo(output: &SharedOutput, combo: &KeyCombo, value: i32) -> Result<()> {
+async fn emit_combo(
+    output: &SharedOutput,
+    combo: &KeyCombo,
+    value: i32,
+    held_modifiers: Option<&HashSet<u16>>,
+) -> Result<()> {
     let mut out = output.lock().await;
     if value == 1 {
+        if let Some(held) = held_modifiers {
+            for code in held {
+                let already = combo.modifiers.iter().any(|m| m.code() == *code);
+                if !already {
+                    out.emit(&[InputEvent::new(EventType::KEY, *code, 1)])?;
+                }
+            }
+        }
         for modifier in &combo.modifiers {
             out.emit(&[InputEvent::new(EventType::KEY, modifier.code(), 1)])?;
         }
         out.emit(&[InputEvent::new(EventType::KEY, combo.key.code(), 1)])?;
     } else {
         out.emit(&[InputEvent::new(EventType::KEY, combo.key.code(), 0)])?;
-        for modifier in &combo.modifiers {
+        for modifier in combo.modifiers.iter().rev() {
             out.emit(&[InputEvent::new(EventType::KEY, modifier.code(), 0)])?;
+        }
+        if let Some(held) = held_modifiers {
+            for code in held {
+                let already = combo.modifiers.iter().any(|m| m.code() == *code);
+                if !already {
+                    out.emit(&[InputEvent::new(EventType::KEY, *code, 0)])?;
+                }
+            }
         }
     }
     Ok(())
@@ -102,6 +125,7 @@ async fn run_macro_once(
     output: &SharedOutput,
     steps: &[crate::config::MacroStep],
     cancel: &CancellationToken,
+    held_modifiers: &SharedModifiers,
 ) {
     let mut pressed: Vec<KeyCombo> = vec![];
 
@@ -109,17 +133,26 @@ async fn run_macro_once(
         if cancel.is_cancelled() {
             break;
         }
+
+        let held_snapshot = held_modifiers.read().await.clone();
+        let held = if held_snapshot.is_empty() {
+            None
+        } else {
+            Some(held_snapshot)
+        };
+
         if step.up {
-            if let Err(e) = emit_combo(output, &step.combo, 0).await {
+            if let Err(e) = emit_combo(output, &step.combo, 0, held.as_ref()).await {
                 tracing::error!("Macro emit error: {}", e);
             }
             pressed.retain(|k| k.key != step.combo.key);
         } else {
-            if let Err(e) = emit_combo(output, &step.combo, 1).await {
+            if let Err(e) = emit_combo(output, &step.combo, 1, held.as_ref()).await {
                 tracing::error!("Macro emit error: {}", e);
             }
             pressed.push(step.combo.clone());
         }
+
         if step.delay_ms > 0 {
             tokio::select! {
                 _ = tokio::time::sleep(tokio::time::Duration::from_millis(step.delay_ms)) => {}
@@ -128,9 +161,14 @@ async fn run_macro_once(
         }
     }
 
-    // always release held keys
+    let held_snapshot = held_modifiers.read().await.clone();
+    let held = if held_snapshot.is_empty() {
+        None
+    } else {
+        Some(held_snapshot)
+    };
     for combo in pressed.iter().rev() {
-        if let Err(e) = emit_combo(output, combo, 0).await {
+        if let Err(e) = emit_combo(output, combo, 0, held.as_ref()).await {
             tracing::error!("Macro release error: {}", e);
         }
     }
@@ -146,19 +184,20 @@ fn spawn_macro(
     output: SharedOutput,
     steps: Vec<crate::config::MacroStep>,
     mode: MacroMode,
+    held_modifiers: SharedModifiers,
 ) -> CancellationToken {
     let token = CancellationToken::new();
     let token_clone = token.clone();
     tokio::spawn(async move {
         match mode {
             MacroMode::Once => {
-                run_macro_once(&output, &steps, &token_clone).await;
+                run_macro_once(&output, &steps, &token_clone, &held_modifiers).await;
             }
             MacroMode::Hold | MacroMode::Toggle => loop {
                 if token_clone.is_cancelled() {
                     break;
                 }
-                run_macro_once(&output, &steps, &token_clone).await;
+                run_macro_once(&output, &steps, &token_clone, &held_modifiers).await;
             },
         }
     });
@@ -185,164 +224,6 @@ fn update_base_layer<'a>(
     if let Some(layer) = config.layers.get(layer_name) {
         state.current_layer = layer;
     }
-}
-
-// ─── Build virtual output device ─────────────────────────────────────────────
-
-fn build_output_device() -> Result<evdev::uinput::VirtualDevice> {
-    Ok(evdev::uinput::VirtualDeviceBuilder::new()?
-        .name("hremap-virtual")
-        .with_keys(&evdev::AttributeSet::from_iter([
-            Key::KEY_A,
-            Key::KEY_B,
-            Key::KEY_C,
-            Key::KEY_D,
-            Key::KEY_E,
-            Key::KEY_F,
-            Key::KEY_G,
-            Key::KEY_H,
-            Key::KEY_I,
-            Key::KEY_J,
-            Key::KEY_K,
-            Key::KEY_L,
-            Key::KEY_M,
-            Key::KEY_N,
-            Key::KEY_O,
-            Key::KEY_P,
-            Key::KEY_Q,
-            Key::KEY_R,
-            Key::KEY_S,
-            Key::KEY_T,
-            Key::KEY_U,
-            Key::KEY_V,
-            Key::KEY_W,
-            Key::KEY_X,
-            Key::KEY_Y,
-            Key::KEY_Z,
-            Key::KEY_1,
-            Key::KEY_2,
-            Key::KEY_3,
-            Key::KEY_4,
-            Key::KEY_5,
-            Key::KEY_6,
-            Key::KEY_7,
-            Key::KEY_8,
-            Key::KEY_9,
-            Key::KEY_0,
-            Key::KEY_ENTER,
-            Key::KEY_ESC,
-            Key::KEY_BACKSPACE,
-            Key::KEY_TAB,
-            Key::KEY_SPACE,
-            Key::KEY_LEFTCTRL,
-            Key::KEY_LEFTSHIFT,
-            Key::KEY_LEFTALT,
-            Key::KEY_RIGHTCTRL,
-            Key::KEY_RIGHTSHIFT,
-            Key::KEY_RIGHTALT,
-            Key::KEY_LEFTMETA,
-            Key::KEY_F1,
-            Key::KEY_F2,
-            Key::KEY_F3,
-            Key::KEY_F4,
-            Key::KEY_F5,
-            Key::KEY_F6,
-            Key::KEY_F7,
-            Key::KEY_F8,
-            Key::KEY_F9,
-            Key::KEY_F10,
-            Key::KEY_F11,
-            Key::KEY_F12,
-            Key::KEY_F13,
-            Key::KEY_F14,
-            Key::KEY_F15,
-            Key::KEY_F16,
-            Key::KEY_F17,
-            Key::KEY_F18,
-            Key::KEY_F19,
-            Key::KEY_F20,
-            Key::KEY_F21,
-            Key::KEY_F22,
-            Key::KEY_F23,
-            Key::KEY_F24,
-            Key::KEY_UP,
-            Key::KEY_DOWN,
-            Key::KEY_LEFT,
-            Key::KEY_RIGHT,
-            Key::KEY_HOME,
-            Key::KEY_END,
-            Key::KEY_DELETE,
-            Key::KEY_INSERT,
-            Key::KEY_PAGEUP,
-            Key::KEY_PAGEDOWN,
-            Key::KEY_CAPSLOCK,
-            Key::KEY_MINUS,
-            Key::KEY_EQUAL,
-            Key::KEY_LEFTBRACE,
-            Key::KEY_RIGHTBRACE,
-            Key::KEY_BACKSLASH,
-            Key::KEY_SEMICOLON,
-            Key::KEY_APOSTROPHE,
-            Key::KEY_GRAVE,
-            Key::KEY_COMMA,
-            Key::KEY_DOT,
-            Key::KEY_SLASH,
-            Key::KEY_PLAYPAUSE,
-            Key::KEY_NEXTSONG,
-            Key::KEY_PREVIOUSSONG,
-            Key::KEY_VOLUMEUP,
-            Key::KEY_VOLUMEDOWN,
-            Key::KEY_MUTE,
-            Key::BTN_LEFT,
-            Key::BTN_RIGHT,
-            Key::BTN_MIDDLE,
-            Key::BTN_SIDE,
-            Key::BTN_EXTRA,
-            Key::KEY_KP0,
-            Key::KEY_KP1,
-            Key::KEY_KP2,
-            Key::KEY_KP3,
-            Key::KEY_KP4,
-            Key::KEY_KP5,
-            Key::KEY_KP6,
-            Key::KEY_KP7,
-            Key::KEY_KP8,
-            Key::KEY_KP9,
-            Key::KEY_KPASTERISK,
-            Key::KEY_KPPLUS,
-            Key::KEY_KPMINUS,
-            Key::KEY_KPDOT,
-            Key::KEY_KPENTER,
-            Key::KEY_KPSLASH,
-            Key::KEY_NUMLOCK,
-            Key::KEY_SCROLLLOCK,
-            Key::KEY_PAUSE,
-            Key::KEY_RIGHTMETA,
-            Key::KEY_STOPCD,
-            Key::KEY_EJECTCD,
-            Key::KEY_CALC,
-            Key::KEY_SLEEP,
-            Key::KEY_WAKEUP,
-            Key::KEY_BRIGHTNESSUP,
-            Key::KEY_BRIGHTNESSDOWN,
-        ]))?
-        .with_relative_axes(&evdev::AttributeSet::from_iter([
-            evdev::RelativeAxisType::REL_X,
-            evdev::RelativeAxisType::REL_Y,
-            evdev::RelativeAxisType::REL_WHEEL,
-            evdev::RelativeAxisType::REL_HWHEEL,
-            evdev::RelativeAxisType::REL_WHEEL_HI_RES,
-            evdev::RelativeAxisType::REL_HWHEEL_HI_RES,
-        ]))?
-        .with_absolute_axis(&UinputAbsSetup::new(
-            AbsoluteAxisType::ABS_X,
-            AbsInfo::new(0, 0, 65535, 0, 0, 1),
-        ))?
-        .with_absolute_axis(&UinputAbsSetup::new(
-            AbsoluteAxisType::ABS_Y,
-            AbsInfo::new(0, 0, 65535, 0, 0, 1),
-        ))?
-        .build()?)
 }
 
 // ─── Grab input devices ───────────────────────────────────────────────────────
@@ -384,10 +265,11 @@ async fn handle_action<'a>(
     state: &mut InputState<'a>,
     config: &'a Config,
     window_rx: &watch::Receiver<Option<WindowInfo>>,
+    held_modifiers: Option<&HashSet<u16>>,
 ) -> Result<()> {
     match action {
         Action::Key(combo) => {
-            emit_combo(output, &combo, value).await?;
+            emit_combo(output, &combo, value, held_modifiers).await?;
         }
         Action::Layer {
             layer: layer_name,
@@ -438,14 +320,24 @@ async fn handle_action<'a>(
             MacroMode::Once => {
                 if value == 1 {
                     stop_macro(state);
-                    let token = spawn_macro(output.clone(), steps, MacroMode::Once);
+                    let token = spawn_macro(
+                        output.clone(),
+                        steps,
+                        MacroMode::Once,
+                        state.held_modifiers.clone(),
+                    );
                     state.macro_cancel = Some(token);
                 }
             }
             MacroMode::Hold => {
                 if value == 1 {
                     stop_macro(state);
-                    let token = spawn_macro(output.clone(), steps, MacroMode::Hold);
+                    let token = spawn_macro(
+                        output.clone(),
+                        steps,
+                        MacroMode::Hold,
+                        state.held_modifiers.clone(),
+                    );
                     state.macro_cancel = Some(token);
                 } else if value == 0 {
                     stop_macro(state);
@@ -456,7 +348,12 @@ async fn handle_action<'a>(
                     if state.macro_cancel.is_some() {
                         stop_macro(state);
                     } else {
-                        let token = spawn_macro(output.clone(), steps, MacroMode::Toggle);
+                        let token = spawn_macro(
+                            output.clone(),
+                            steps,
+                            MacroMode::Toggle,
+                            state.held_modifiers.clone(),
+                        );
                         state.macro_cancel = Some(token);
                     }
                 }
@@ -469,7 +366,7 @@ async fn handle_action<'a>(
 // ─── Main event loop ──────────────────────────────────────────────────────────
 
 pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
-    let output = Arc::new(Mutex::new(build_output_device()?));
+    let output = Arc::new(Mutex::new(utils::build_output_device()?));
     let mut streams = grab_devices(&config.device_names);
 
     if streams.is_empty() {
@@ -501,7 +398,6 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
             None => continue,
         };
 
-        // forward non-key events (mouse movement, scroll) — suppress EV_ABS
         if ev.event_type() != EventType::KEY {
             if ev.event_type() != EventType::ABSOLUTE {
                 let mut out = output.lock().await;
@@ -513,14 +409,13 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
         let key = Key::new(ev.code());
         let value = ev.value();
 
-        // track and pass through modifier keys
         if is_modifier_key(key) {
             match value {
                 1 => {
-                    state.held_modifiers.insert(key.code());
+                    state.held_modifiers.write().await.insert(key.code());
                 }
                 0 => {
-                    state.held_modifiers.remove(&key.code());
+                    state.held_modifiers.write().await.remove(&key.code());
                 }
                 _ => {}
             }
@@ -529,20 +424,17 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
             continue;
         }
 
-        // skip repeat events
         if value == 2 {
             let mut out = output.lock().await;
             out.emit(&[ev])?;
             continue;
         }
 
-        // update base layer on window change
         if window_rx.has_changed()? {
             let active_window = window_rx.borrow_and_update().clone();
             update_base_layer(&config, &mut state, &active_window);
         }
 
-        // handle shift trigger release
         if value == 0 && state.shift_trigger_key == Some(key.code()) {
             tracing::info!("Shift trigger released");
             state.shift_layer = None;
@@ -550,15 +442,53 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
             continue;
         }
 
-        let modifier_index = compute_modifier_index(&state.held_modifiers);
-        let action = state
-            .active_layer()
-            .lookup(key.code(), modifier_index)
-            .cloned();
+        // ─── Key up: use pending release if available ─────────────────────
+        if value == 0 {
+            if let Some(action) = state.pending_releases.remove(&key.code()) {
+                handle_action(
+                    action, value, key, &output, &mut state, &config, &window_rx, None,
+                )
+                .await?;
+                continue;
+            }
+            // no pending release = was a passthrough, let it fall through
+            let mut out = output.lock().await;
+            out.emit(&[ev])?;
+            continue;
+        }
+
+        // ─── Key down: resolve and store pending release ──────────────────
+        let modifier_index = {
+            let held = state.held_modifiers.read().await;
+            compute_modifier_index(&held)
+        };
+
+        let action = state.active_layer().lookup(key.code(), modifier_index);
 
         match action {
-            Some(action) => {
-                handle_action(action, value, key, &output, &mut state, &config, &window_rx).await?;
+            Some(LookupResult::Exact(action)) => {
+                let action = action.clone();
+                state.pending_releases.insert(key.code(), action.clone());
+                handle_action(
+                    action, value, key, &output, &mut state, &config, &window_rx, None,
+                )
+                .await?;
+            }
+            Some(LookupResult::Fallback(action)) => {
+                let action = action.clone();
+                let held = state.held_modifiers.read().await.clone();
+                state.pending_releases.insert(key.code(), action.clone());
+                handle_action(
+                    action,
+                    value,
+                    key,
+                    &output,
+                    &mut state,
+                    &config,
+                    &window_rx,
+                    Some(&held),
+                )
+                .await?;
             }
             None => {
                 let mut out = output.lock().await;

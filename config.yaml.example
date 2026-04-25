@@ -126,6 +126,21 @@ layers:
         action:
           type: key
           keys: ["BACKSPACE"]
+  programming:
+    parent: default
+    mappings:
+      - trigger: ["F20"]
+        action:
+          type: layer
+          layer: programming_shift
+          mode: shift
+  programming_shift:
+    parent: default_shift
+    mappings:
+      - trigger: ["V"]
+        action:
+          type: key
+          keys: ["CTRL","PERIOD"]
 
   # ─── Gaming Base ────────────────────────────────────────────────────────────
   gaming_base:
@@ -244,153 +259,67 @@ layers:
   mmorpg:
     parent: gaming_base
     mappings:
-      - trigger: ["F21"]
-        action:
-          type: key
-          keys: ["1"]
-      - trigger: ["F22"]
-        action:
-          type: key
-          keys: ["2"]
-      - trigger: ["BTN_EXTRA"]
-        action:
-          type: key
-          keys: ["3"]
-      - trigger: ["BTN_SIDE"]
-        action:
-          type: key
-          keys: ["4"]
       # - trigger: ["F21"]
       #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["1"]
-      #         delay_ms: 5
-      #       - keys: ["1"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["CTRL", "F21"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["CTRL", "1"]
-      #         delay_ms: 5
-      #       - keys: ["CTRL", "1"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["ALT", "F21"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["ALT", "1"]
-      #         delay_ms: 5
-      #       - keys: ["ALT", "1"]
-      #         up: true
-      #         delay_ms: 250
-
+      #     type: key
+      #     keys: ["1"]
       # - trigger: ["F22"]
       #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["2"]
-      #         delay_ms: 5
-      #       - keys: ["2"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["CTRL", "F22"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["CTRL", "2"]
-      #         delay_ms: 5
-      #       - keys: ["CTRL", "2"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["ALT", "F22"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["ALT", "2"]
-      #         delay_ms: 5
-      #       - keys: ["ALT", "2"]
-      #         up: true
-      #         delay_ms: 250
-
+      #     type: key
+      #     keys: ["2"]
       # - trigger: ["BTN_EXTRA"]
       #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["3"]
-      #         delay_ms: 5
-      #       - keys: ["3"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["CTRL", "BTN_EXTRA"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["CTRL", "3"]
-      #         delay_ms: 5
-      #       - keys: ["CTRL", "3"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["ALT", "BTN_EXTRA"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["ALT", "3"]
-      #         delay_ms: 5
-      #       - keys: ["ALT", "3"]
-      #         up: true
-      #         delay_ms: 250
-
+      #     type: key
+      #     keys: ["3"]
       # - trigger: ["BTN_SIDE"]
       #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["4"]
-      #         delay_ms: 5
-      #       - keys: ["4"]
-      #         up: true
-      #         delay_ms: 250
+      #     type: key
+      #     keys: ["4"]
+      - trigger: ["F21"]
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["1"]
+              delay_ms: 5
+            - keys: ["1"]
+              up: true
+              delay_ms: 250
 
-      # - trigger: ["CTRL", "BTN_SIDE"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["CTRL", "4"]
-      #         delay_ms: 5
-      #       - keys: ["CTRL", "4"]
-      #         up: true
-      #         delay_ms: 250
+      - trigger: ["F22"]
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["2"]
+              delay_ms: 5
+            - keys: ["2"]
+              up: true
+              delay_ms: 250
 
-      # - trigger: ["ALT", "BTN_SIDE"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["ALT", "4"]
-      #         delay_ms: 5
-      #       - keys: ["ALT", "4"]
-      #         up: true
-      #         delay_ms: 250
+      - trigger: ["BTN_EXTRA"]
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["3"]
+              delay_ms: 5
+            - keys: ["3"]
+              up: true
+              delay_ms: 250
+
+
+      - trigger: ["BTN_SIDE"]
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["4"]
+              delay_ms: 5
+            - keys: ["4"]
+              up: true
+              delay_ms: 250
+
  
       - trigger: ["F20"]          # Mouse Shift → MMORPG Shift
         action:
@@ -434,43 +363,21 @@ layers:
               up: true
               delay_ms: 100
  
-      - trigger: ["BTN_LEFT"]
-        action:
-          type: key
-          keys: ["5"]
       # - trigger: ["BTN_LEFT"]
       #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["5"]
-      #         delay_ms: 5
-      #       - keys: ["5"]
-      #         up: true
-      #         delay_ms: 250
+      #     type: key
+      #     keys: ["5"]
+      - trigger: ["BTN_LEFT"]
+        action:
+          type: macro
+          mode: hold
+          steps:
+            - keys: ["5"]
+              delay_ms: 5
+            - keys: ["5"]
+              up: true
+              delay_ms: 250
 
-      # - trigger: ["CTRL", "BTN_LEFT"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["CTRL", "5"]
-      #         delay_ms: 5
-      #       - keys: ["CTRL", "5"]
-      #         up: true
-      #         delay_ms: 250
-
-      # - trigger: ["ALT", "BTN_LEFT"]
-      #   action:
-      #     type: macro
-      #     mode: hold
-      #     steps:
-      #       - keys: ["ALT", "5"]
-      #         delay_ms: 5
-      #       - keys: ["ALT", "5"]
-      #         up: true
-      #         delay_ms: 250
- 
       - trigger: ["BTN_RIGHT"]    # Right Click → Hold 6
         action:
           type: key
@@ -541,9 +448,5 @@ layers:
 profiles:
   - wm_classes: ["gw2-64.exe"]
     layer: mmorpg
-# profiles:
-#   - wm_classes: ["code"]
-#     layer: programming
-
-#   - wm_classes: ["org.mozilla.firefox"]
-#     layer: firefox
+  - wm_classes: ["code"]
+    layer: programming
