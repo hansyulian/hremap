@@ -1,17 +1,10 @@
 use anyhow::Result;
 use futures_util::StreamExt;
-use serde::Deserialize;
 use tokio::sync::watch;
 use zbus::proxy;
 use zbus::Connection;
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct WindowInfo {
-    pub title: String,
-    pub wm_class: String,
-    pub wm_class_instance: String,
-    pub pid: u32,
-}
+use crate::watcher::WindowInfo;
 
 #[proxy(
     interface = "org.gnome.shell.extensions.FocusedWindow",

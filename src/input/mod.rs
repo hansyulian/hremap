@@ -14,7 +14,7 @@ use crate::config::{
     compute_modifier_index, is_modifier_key, Action, Config, KeyCombo, LayerMode, LookupResult,
     MacroMode, ResolvedLayer,
 };
-use crate::watcher::gnome::WindowInfo;
+use crate::watcher::WindowInfo;
 
 type SharedOutput = Arc<Mutex<evdev::uinput::VirtualDevice>>;
 type SharedModifiers = Arc<RwLock<HashSet<u16>>>;

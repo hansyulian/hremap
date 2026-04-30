@@ -8,12 +8,13 @@ CONFIG_DIR="$HOME/.config/$BINARY_NAME"
 CONFIG_FILE="config.yaml"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/$BINARY_NAME.service"
+DATA_DIR="$HOME/.local/share/$BINARY_NAME"
 
 # ─── Colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-NC='\033[0m' # no color
+NC='\033[0m'
 
 info()    { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC} $1"; }
@@ -46,6 +47,22 @@ if [ ! -f "Cargo.toml" ]; then
     error "Please run this script from the hremap project root directory"
 fi
 
+# ─── Detect desktop environment ──────────────────────────────────────────────
+detect_de() {
+    local xdg="${XDG_CURRENT_DESKTOP,,}"
+    local session="${DESKTOP_SESSION,,}"
+    if [[ "$xdg" == *"kde"* || "$xdg" == *"plasma"* || "$session" == *"plasma"* || "$session" == *"kde"* ]]; then
+        echo "kde"
+    elif [[ "$xdg" == *"gnome"* || "$xdg" == *"unity"* || "$xdg" == *"pop"* ]]; then
+        echo "gnome"
+    else
+        echo "unknown"
+    fi
+}
+
+DE=$(detect_de)
+info "Detected desktop environment: $DE"
+
 # ─── Build release binary ────────────────────────────────────────────────────
 info "Building release binary..."
 cargo build --release
@@ -62,6 +79,7 @@ info "Binary installed"
 
 # ─── Set up config directory ─────────────────────────────────────────────────
 mkdir -p "$CONFIG_DIR"
+mkdir -p "$DATA_DIR"
 
 copy_config() {
     if [ -f "$CONFIG_FILE" ]; then
@@ -87,6 +105,38 @@ else
     info "Config already exists at $CONFIG_DIR/$CONFIG_FILE — skipping (use --replace-config to overwrite)"
 fi
 
+# ─── DE-specific setup ───────────────────────────────────────────────────────
+setup_kde() {
+    info "Setting up KDE-specific components..."
+
+    local kwin_script_src="assets/kwin-watcher.js"
+    local kwin_script_dst="$DATA_DIR/kwin-watcher.js"
+
+    if [ ! -f "$kwin_script_src" ]; then
+        error "KWin script not found at $kwin_script_src — make sure you're running from the project root"
+    fi
+
+    if [ ! -f "$kwin_script_dst" ] || ! diff -q "$kwin_script_src" "$kwin_script_dst" > /dev/null 2>&1; then
+        info "Installing KWin script to $kwin_script_dst..."
+        cp "$kwin_script_src" "$kwin_script_dst"
+        info "KWin script installed"
+    else
+        info "KWin script already up to date — skipping"
+    fi
+}
+
+setup_gnome() {
+    info "Setting up GNOME-specific components..."
+    # Add any GNOME-specific setup here if your gnome watcher needs it
+    info "GNOME setup complete"
+}
+
+case "$DE" in
+    kde)   setup_kde ;;
+    gnome) setup_gnome ;;
+    *)     warn "Unknown desktop environment — skipping DE-specific setup" ;;
+esac
+
 # ─── Add user to input group if not already ──────────────────────────────────
 if ! groups "$USER" | grep -q "\binput\b"; then
     info "Adding $USER to input group..."
@@ -94,6 +144,34 @@ if ! groups "$USER" | grep -q "\binput\b"; then
     warn "You need to log out and back in for the input group to take effect"
 else
     info "User $USER is already in the input group"
+fi
+
+# ─── Add user to uinput group ────────────────────────────────────────────────
+if ! getent group uinput > /dev/null 2>&1; then
+    info "Creating uinput group..."
+    sudo groupadd uinput
+fi
+
+if ! groups "$USER" | grep -q "\buinput\b"; then
+    info "Adding $USER to uinput group..."
+    sudo usermod -aG uinput "$USER"
+    warn "You need to log out and back in for the uinput group to take effect"
+else
+    info "User $USER is already in the uinput group"
+fi
+
+# ─── Set up udev rule for /dev/uinput ────────────────────────────────────────
+UDEV_RULE_FILE="/etc/udev/rules.d/99-uinput.rules"
+UDEV_RULE='KERNEL=="uinput", GROUP="uinput", MODE="0660"'
+
+if [ ! -f "$UDEV_RULE_FILE" ] || ! grep -qF "$UDEV_RULE" "$UDEV_RULE_FILE"; then
+    info "Writing udev rule for /dev/uinput..."
+    echo "$UDEV_RULE" | sudo tee "$UDEV_RULE_FILE" > /dev/null
+    info "Reloading udev rules..."
+    sudo udevadm control --reload-rules && sudo udevadm trigger
+    info "udev rule applied"
+else
+    info "udev rule for uinput already exists — skipping"
 fi
 
 # ─── Create systemd user service ─────────────────────────────────────────────
@@ -143,3 +221,6 @@ echo "  systemctl --user stop hremap.service     # stop"
 echo "  systemctl --user status hremap.service   # check status"
 echo ""
 echo "Config file: $CONFIG_DIR/$CONFIG_FILE"
+if [ "$DE" = "kde" ]; then
+    echo "KWin script: $DATA_DIR/kwin-watcher.js"
+fi

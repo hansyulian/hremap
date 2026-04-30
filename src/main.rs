@@ -5,6 +5,25 @@ mod watcher;
 
 use tokio::sync::watch;
 
+fn detect_de() -> &'static str {
+    let xdg = std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_default();
+    let xdg = xdg.to_lowercase();
+    if xdg.contains("kde") || xdg.contains("plasma") {
+        "kde"
+    } else if xdg.contains("gnome") || xdg.contains("unity") || xdg.contains("pop") {
+        "gnome"
+    } else {
+        // fallback: check DESKTOP_SESSION too
+        let session = std::env::var("DESKTOP_SESSION").unwrap_or_default();
+        let session = session.to_lowercase();
+        if session.contains("plasma") || session.contains("kde") {
+            "kde"
+        } else {
+            "gnome"
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -26,8 +45,16 @@ async fn main() -> anyhow::Result<()> {
     let (window_tx, window_rx) = watch::channel(None);
     let window_rx_printer = window_rx.clone();
 
+    let de = detect_de();
+    tracing::info!("Detected desktop environment: {}", de);
+
     tokio::spawn(async move {
-        if let Err(e) = watcher::gnome::watch(window_tx).await {
+        let result = match de {
+            "kde" => watcher::kde::watch(window_tx).await,
+            "gnome" => watcher::gnome::watch(window_tx).await,
+            _ => Err(anyhow::anyhow!("Unsupported desktop environment: {}", de)),
+        };
+        if let Err(e) = result {
             tracing::error!("Watcher error: {}", e);
         }
     });
