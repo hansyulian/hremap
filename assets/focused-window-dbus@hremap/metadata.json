@@ -3,6 +3,6 @@
   "name": "Focused Window DBus",
   "description": "Exposes focused window info via DBus for hremap",
   "version": 1,
-  "shell-version": ["45", "46", "47", "48","49"],
+  "shell-version": ["45", "46", "47", "48","49","50"],
   "uuid": "focused-window-dbus@hremap"
 }

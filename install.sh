@@ -127,7 +127,9 @@ setup_kde() {
 
 setup_gnome() {
     info "Setting up GNOME-specific components..."
-    # Add any GNOME-specific setup here if your gnome watcher needs it
+    mkdir -p ~/.local/share/gnome-shell/extensions
+    cp -R assets/focused-window-dbus@hremap/ ~/.local/share/gnome-shell/extensions/
+    
     info "GNOME setup complete"
 }
 
@@ -189,6 +191,8 @@ Type=simple
 ExecStart=$INSTALL_PATH $CONFIG_DIR/$CONFIG_FILE
 Restart=on-failure
 RestartSec=3
+CPUSchedulingPolicy=rr
+CPUSchedulingPriority=50
 
 [Install]
 WantedBy=graphical-session.target
