@@ -4,9 +4,10 @@ use evdev::{EventType, InputEvent, Key};
 use futures_util::StreamExt;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::sync::Mutex;
 use tokio::sync::RwLock;
+use tokio_stream::StreamMap;
 use tokio_util::sync::CancellationToken;
 mod utils;
 
@@ -16,8 +17,8 @@ use crate::config::{
 };
 use crate::watcher::WindowInfo;
 
-type SharedOutput = Arc<Mutex<evdev::uinput::VirtualDevice>>;
 type SharedModifiers = Arc<RwLock<HashSet<u16>>>;
+type MacroTx = mpsc::UnboundedSender<InputEvent>;
 
 // ─── Input State ─────────────────────────────────────────────────────────────
 
@@ -82,36 +83,38 @@ fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
 
 // ─── Output helpers ───────────────────────────────────────────────────────────
 
-async fn emit_combo(
-    output: &SharedOutput,
+fn emit_key(output: &mut evdev::uinput::VirtualDevice, code: u16, value: i32) -> Result<()> {
+    output.emit(&[InputEvent::new(EventType::KEY, code, value)])?;
+    Ok(())
+}
+
+fn emit_combo(
+    output: &mut evdev::uinput::VirtualDevice,
     combo: &KeyCombo,
     value: i32,
     held_modifiers: Option<&HashSet<u16>>,
 ) -> Result<()> {
-    let mut out = output.lock().await;
     if value == 1 {
         if let Some(held) = held_modifiers {
             for code in held {
-                let already = combo.modifiers.iter().any(|m| m.code() == *code);
-                if !already {
-                    out.emit(&[InputEvent::new(EventType::KEY, *code, 1)])?;
+                if !combo.modifiers.iter().any(|m| m.code() == *code) {
+                    emit_key(output, *code, 1)?;
                 }
             }
         }
         for modifier in &combo.modifiers {
-            out.emit(&[InputEvent::new(EventType::KEY, modifier.code(), 1)])?;
+            emit_key(output, modifier.code(), 1)?;
         }
-        out.emit(&[InputEvent::new(EventType::KEY, combo.key.code(), 1)])?;
+        emit_key(output, combo.key.code(), 1)?;
     } else {
-        out.emit(&[InputEvent::new(EventType::KEY, combo.key.code(), 0)])?;
+        emit_key(output, combo.key.code(), 0)?;
         for modifier in combo.modifiers.iter().rev() {
-            out.emit(&[InputEvent::new(EventType::KEY, modifier.code(), 0)])?;
+            emit_key(output, modifier.code(), 0)?;
         }
         if let Some(held) = held_modifiers {
             for code in held {
-                let already = combo.modifiers.iter().any(|m| m.code() == *code);
-                if !already {
-                    out.emit(&[InputEvent::new(EventType::KEY, *code, 0)])?;
+                if !combo.modifiers.iter().any(|m| m.code() == *code) {
+                    emit_key(output, *code, 0)?;
                 }
             }
         }
@@ -122,7 +125,7 @@ async fn emit_combo(
 // ─── Macro helpers ────────────────────────────────────────────────────────────
 
 async fn run_macro_once(
-    output: &SharedOutput,
+    tx: &MacroTx,
     steps: &[crate::config::MacroStep],
     cancel: &CancellationToken,
     held_modifiers: &SharedModifiers,
@@ -141,15 +144,17 @@ async fn run_macro_once(
             Some(held_snapshot)
         };
 
-        if step.up {
-            if let Err(e) = emit_combo(output, &step.combo, 0, held.as_ref()).await {
-                tracing::error!("Macro emit error: {}", e);
+        let events = build_combo_events(&step.combo, if step.up { 0 } else { 1 }, held.as_ref());
+
+        for ev in events {
+            if tx.send(ev).is_err() {
+                return;
             }
+        }
+
+        if step.up {
             pressed.retain(|k| k.key != step.combo.key);
         } else {
-            if let Err(e) = emit_combo(output, &step.combo, 1, held.as_ref()).await {
-                tracing::error!("Macro emit error: {}", e);
-            }
             pressed.push(step.combo.clone());
         }
 
@@ -168,10 +173,50 @@ async fn run_macro_once(
         Some(held_snapshot)
     };
     for combo in pressed.iter().rev() {
-        if let Err(e) = emit_combo(output, combo, 0, held.as_ref()).await {
-            tracing::error!("Macro release error: {}", e);
+        let events = build_combo_events(combo, 0, held.as_ref());
+        for ev in events {
+            if tx.send(ev).is_err() {
+                return;
+            }
         }
     }
+}
+
+/// Build the list of InputEvents for a combo without needing the device directly.
+fn build_combo_events(
+    combo: &KeyCombo,
+    value: i32,
+    held_modifiers: Option<&HashSet<u16>>,
+) -> Vec<InputEvent> {
+    let mut events = vec![];
+    if value == 1 {
+        if let Some(held) = held_modifiers {
+            for code in held {
+                let already = combo.modifiers.iter().any(|m| m.code() == *code);
+                if !already {
+                    events.push(InputEvent::new(EventType::KEY, *code, 1));
+                }
+            }
+        }
+        for modifier in &combo.modifiers {
+            events.push(InputEvent::new(EventType::KEY, modifier.code(), 1));
+        }
+        events.push(InputEvent::new(EventType::KEY, combo.key.code(), 1));
+    } else {
+        events.push(InputEvent::new(EventType::KEY, combo.key.code(), 0));
+        for modifier in combo.modifiers.iter().rev() {
+            events.push(InputEvent::new(EventType::KEY, modifier.code(), 0));
+        }
+        if let Some(held) = held_modifiers {
+            for code in held {
+                let already = combo.modifiers.iter().any(|m| m.code() == *code);
+                if !already {
+                    events.push(InputEvent::new(EventType::KEY, *code, 0));
+                }
+            }
+        }
+    }
+    events
 }
 
 fn stop_macro(state: &mut InputState) {
@@ -181,7 +226,7 @@ fn stop_macro(state: &mut InputState) {
 }
 
 fn spawn_macro(
-    output: SharedOutput,
+    tx: MacroTx,
     steps: Vec<crate::config::MacroStep>,
     mode: MacroMode,
     held_modifiers: SharedModifiers,
@@ -191,13 +236,13 @@ fn spawn_macro(
     tokio::spawn(async move {
         match mode {
             MacroMode::Once => {
-                run_macro_once(&output, &steps, &token_clone, &held_modifiers).await;
+                run_macro_once(&tx, &steps, &token_clone, &held_modifiers).await;
             }
             MacroMode::Hold | MacroMode::Toggle => loop {
                 if token_clone.is_cancelled() {
                     break;
                 }
-                run_macro_once(&output, &steps, &token_clone, &held_modifiers).await;
+                run_macro_once(&tx, &steps, &token_clone, &held_modifiers).await;
             },
         }
     });
@@ -228,31 +273,25 @@ fn update_base_layer<'a>(
 
 // ─── Grab input devices ───────────────────────────────────────────────────────
 
-fn grab_devices(device_names: &[String]) -> Vec<evdev::EventStream> {
-    evdev::enumerate()
-        .filter_map(|(_, mut device)| {
-            if !should_grab(&device, device_names) {
-                return None;
-            }
-            let name = device.name().unwrap_or("unknown").to_string();
-            match device.grab() {
-                Ok(_) => {
+fn grab_devices(device_names: &[String]) -> StreamMap<String, evdev::EventStream> {
+    let mut map = StreamMap::new();
+    for (_, mut device) in evdev::enumerate() {
+        if !should_grab(&device, device_names) {
+            continue;
+        }
+        let name = device.name().unwrap_or("unknown").to_string();
+        match device.grab() {
+            Ok(_) => match device.into_event_stream() {
+                Ok(stream) => {
                     tracing::info!("Grabbed device: {}", name);
-                    match device.into_event_stream() {
-                        Ok(stream) => Some(stream),
-                        Err(e) => {
-                            tracing::warn!("Failed to stream {}: {}", name, e);
-                            None
-                        }
-                    }
+                    map.insert(name, stream);
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to grab {}: {}", name, e);
-                    None
-                }
-            }
-        })
-        .collect()
+                Err(e) => tracing::warn!("Failed to stream {}: {}", name, e),
+            },
+            Err(e) => tracing::warn!("Failed to grab {}: {}", name, e),
+        }
+    }
+    map
 }
 
 // ─── Action handler ───────────────────────────────────────────────────────────
@@ -261,7 +300,8 @@ async fn handle_action<'a>(
     action: Action,
     value: i32,
     key: Key,
-    output: &SharedOutput,
+    output: &mut evdev::uinput::VirtualDevice,
+    tx: &MacroTx,
     state: &mut InputState<'a>,
     config: &'a Config,
     window_rx: &watch::Receiver<Option<WindowInfo>>,
@@ -269,7 +309,7 @@ async fn handle_action<'a>(
 ) -> Result<()> {
     match action {
         Action::Key(combo) => {
-            emit_combo(output, &combo, value, held_modifiers).await?;
+            emit_combo(output, &combo, value, held_modifiers)?;
         }
         Action::Layer {
             layer: layer_name,
@@ -321,7 +361,7 @@ async fn handle_action<'a>(
                 if value == 1 {
                     stop_macro(state);
                     let token = spawn_macro(
-                        output.clone(),
+                        tx.clone(),
                         steps,
                         MacroMode::Once,
                         state.held_modifiers.clone(),
@@ -333,7 +373,7 @@ async fn handle_action<'a>(
                 if value == 1 {
                     stop_macro(state);
                     let token = spawn_macro(
-                        output.clone(),
+                        tx.clone(),
                         steps,
                         MacroMode::Hold,
                         state.held_modifiers.clone(),
@@ -349,7 +389,7 @@ async fn handle_action<'a>(
                         stop_macro(state);
                     } else {
                         let token = spawn_macro(
-                            output.clone(),
+                            tx.clone(),
                             steps,
                             MacroMode::Toggle,
                             state.held_modifiers.clone(),
@@ -366,7 +406,9 @@ async fn handle_action<'a>(
 // ─── Main event loop ──────────────────────────────────────────────────────────
 
 pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
-    let output = Arc::new(Mutex::new(utils::build_output_device()?));
+    let mut output = utils::build_output_device()?;
+    let (macro_tx, mut macro_rx) = mpsc::unbounded_channel::<InputEvent>();
+
     let mut streams = grab_devices(&config.device_names);
 
     if streams.is_empty() {
@@ -383,116 +425,104 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
     let mut state = InputState::new(default_layer);
 
     loop {
-        let event = {
-            let futures = streams.iter_mut().map(|s| Box::pin(s.next()));
-            let (result, _, _) = futures_util::future::select_all(futures).await;
-            result
-        };
+        tokio::select! {
+            biased;
 
-        let ev = match event {
-            Some(Ok(ev)) => ev,
-            Some(Err(e)) => {
-                tracing::error!("Input error: {}", e);
-                continue;
+            // ─── Macro events come first (biased) so they drain quickly ───
+            Some(ev) = macro_rx.recv() => {
+                output.emit(&[ev])?;
             }
-            None => continue,
-        };
 
-        if ev.event_type() != EventType::KEY {
-            if ev.event_type() != EventType::ABSOLUTE {
-                let mut out = output.lock().await;
-                out.emit(&[ev])?;
-            }
-            continue;
-        }
+            // ─── Real input events ────────────────────────────────────────
+            Some((_, event)) = streams.next() => {
+                let ev = match event {
+                    Ok(ev) => ev,
+                    Err(e) => {
+                        tracing::error!("Input error: {}", e);
+                        continue;
+                    }
+                };
 
-        let key = Key::new(ev.code());
-        let value = ev.value();
-
-        if is_modifier_key(key) {
-            match value {
-                1 => {
-                    state.held_modifiers.write().await.insert(key.code());
+                if ev.event_type() != EventType::KEY {
+                    if ev.event_type() != EventType::ABSOLUTE {
+                        output.emit(&[ev])?;
+                    }
+                    continue;
                 }
-                0 => {
-                    state.held_modifiers.write().await.remove(&key.code());
+
+                let key = Key::new(ev.code());
+                let value = ev.value();
+
+                if is_modifier_key(key) {
+                    match value {
+                        1 => { state.held_modifiers.write().await.insert(key.code()); }
+                        0 => { state.held_modifiers.write().await.remove(&key.code()); }
+                        _ => {}
+                    }
+                    output.emit(&[ev])?;
+                    continue;
                 }
-                _ => {}
-            }
-            let mut out = output.lock().await;
-            out.emit(&[ev])?;
-            continue;
-        }
 
-        if value == 2 {
-            let mut out = output.lock().await;
-            out.emit(&[ev])?;
-            continue;
-        }
+                if value == 2 {
+                    output.emit(&[ev])?;
+                    continue;
+                }
 
-        if window_rx.has_changed()? {
-            let active_window = window_rx.borrow_and_update().clone();
-            update_base_layer(&config, &mut state, &active_window);
-        }
+                if window_rx.has_changed()? {
+                    let active_window = window_rx.borrow_and_update().clone();
+                    update_base_layer(&config, &mut state, &active_window);
+                }
 
-        if value == 0 && state.shift_trigger_key == Some(key.code()) {
-            tracing::info!("Shift trigger released");
-            state.shift_layer = None;
-            state.shift_trigger_key = None;
-            continue;
-        }
+                if value == 0 && state.shift_trigger_key == Some(key.code()) {
+                    tracing::info!("Shift trigger released");
+                    state.shift_layer = None;
+                    state.shift_trigger_key = None;
+                    continue;
+                }
 
-        // ─── Key up: use pending release if available ─────────────────────
-        if value == 0 {
-            if let Some(action) = state.pending_releases.remove(&key.code()) {
-                handle_action(
-                    action, value, key, &output, &mut state, &config, &window_rx, None,
-                )
-                .await?;
-                continue;
-            }
-            // no pending release = was a passthrough, let it fall through
-            let mut out = output.lock().await;
-            out.emit(&[ev])?;
-            continue;
-        }
+                // ─── Key up ───────────────────────────────────────────────
+                if value == 0 {
+                    if let Some(action) = state.pending_releases.remove(&key.code()) {
+                        handle_action(
+                            action, value, key, &mut output, &macro_tx,
+                            &mut state, &config, &window_rx, None,
+                        ).await?;
+                    } else {
+                        output.emit(&[ev])?;
+                    }
+                    continue;
+                }
 
-        // ─── Key down: resolve and store pending release ──────────────────
-        let modifier_index = {
-            let held = state.held_modifiers.read().await;
-            compute_modifier_index(&held)
-        };
+                // ─── Key down ─────────────────────────────────────────────
+                let modifier_index = {
+                    let held = state.held_modifiers.read().await;
+                    compute_modifier_index(&held)
+                };
 
-        let action = state.active_layer().lookup(key.code(), modifier_index);
+                let action = state.active_layer().lookup(key.code(), modifier_index);
 
-        match action {
-            Some(LookupResult::Exact(action)) => {
-                let action = action.clone();
-                state.pending_releases.insert(key.code(), action.clone());
-                handle_action(
-                    action, value, key, &output, &mut state, &config, &window_rx, None,
-                )
-                .await?;
-            }
-            Some(LookupResult::Fallback(action)) => {
-                let action = action.clone();
-                let held = state.held_modifiers.read().await.clone();
-                state.pending_releases.insert(key.code(), action.clone());
-                handle_action(
-                    action,
-                    value,
-                    key,
-                    &output,
-                    &mut state,
-                    &config,
-                    &window_rx,
-                    Some(&held),
-                )
-                .await?;
-            }
-            None => {
-                let mut out = output.lock().await;
-                out.emit(&[ev])?;
+                match action {
+                    Some(LookupResult::Exact(action)) => {
+                        let action = action.clone();
+                        state.pending_releases.insert(key.code(), action.clone());
+                        handle_action(
+                            action, value, key, &mut output, &macro_tx,
+                            &mut state, &config, &window_rx, None,
+                        ).await?;
+                    }
+                    Some(LookupResult::Fallback(action)) => {
+                        let action = action.clone();
+                        let held = state.held_modifiers.read().await.clone();
+                        state.pending_releases.insert(key.code(), action.clone());
+                        handle_action(
+                            action, value, key, &mut output, &macro_tx,
+                            &mut state, &config, &window_rx, Some(&held),
+                        ).await?;
+                    }
+                    None => {
+                        output.emit(&[ev])?;
+                    }
+                }
             }
         }
     }
