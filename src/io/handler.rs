@@ -5,7 +5,7 @@ use crate::utils::{compute_modifier_index, is_modifier_key};
 use anyhow::Result;
 use evdev::{EventType, InputEvent, Key};
 use futures_util::StreamExt;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 use tokio_stream::StreamMap;
@@ -113,8 +113,8 @@ fn build_combo_events(
     events
 }
 
-fn stop_macro(state: &mut super::types::InputState) {
-    if let Some(token) = state.macro_cancel.take() {
+fn stop_macro_for_key(state: &mut InputState, key_code: u16) {
+    if let Some(token) = state.macro_cancels.remove(&key_code) {
         token.cancel();
     }
 }
@@ -124,7 +124,13 @@ fn spawn_macro(
     steps: Vec<crate::config::MacroStep>,
     mode: MacroMode,
     held_modifiers: SharedModifiers,
-) -> CancellationToken {
+    key_code: u16,
+    cancels: &mut HashMap<u16, CancellationToken>,
+) {
+    // cancel existing for this key if any
+    if let Some(existing) = cancels.remove(&key_code) {
+        existing.cancel();
+    }
     let token = CancellationToken::new();
     let token_clone = token.clone();
     tokio::spawn(async move {
@@ -140,7 +146,7 @@ fn spawn_macro(
             },
         }
     });
-    token
+    cancels.insert(key_code, token);
 }
 
 // ─── Layer helpers ────────────────────────────────────────────────────────────
@@ -253,42 +259,43 @@ async fn handle_action<'a>(
         Action::Macro { mode, steps } => match mode {
             MacroMode::Once => {
                 if value == 1 {
-                    stop_macro(state);
-                    let token = spawn_macro(
+                    spawn_macro(
                         tx.clone(),
                         steps,
                         MacroMode::Once,
                         state.held_modifiers.clone(),
+                        key.code(),
+                        &mut state.macro_cancels,
                     );
-                    state.macro_cancel = Some(token);
                 }
             }
             MacroMode::Hold => {
                 if value == 1 {
-                    stop_macro(state);
-                    let token = spawn_macro(
+                    spawn_macro(
                         tx.clone(),
                         steps,
                         MacroMode::Hold,
                         state.held_modifiers.clone(),
+                        key.code(),
+                        &mut state.macro_cancels,
                     );
-                    state.macro_cancel = Some(token);
                 } else if value == 0 {
-                    stop_macro(state);
+                    stop_macro_for_key(state, key.code());
                 }
             }
             MacroMode::Toggle => {
                 if value == 1 {
-                    if state.macro_cancel.is_some() {
-                        stop_macro(state);
+                    if state.macro_cancels.contains_key(&key.code()) {
+                        stop_macro_for_key(state, key.code());
                     } else {
-                        let token = spawn_macro(
+                        spawn_macro(
                             tx.clone(),
                             steps,
                             MacroMode::Toggle,
                             state.held_modifiers.clone(),
+                            key.code(),
+                            &mut state.macro_cancels,
                         );
-                        state.macro_cancel = Some(token);
                     }
                 }
             }
@@ -335,6 +342,9 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
                         continue;
                     }
                 };
+
+                // prune finished macros
+                state.macro_cancels.retain(|_, t| !t.is_cancelled());
 
                 if ev.event_type() != EventType::KEY {
                     if ev.event_type() != EventType::ABSOLUTE {
@@ -417,6 +427,7 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
                     }
                 }
             }
+
         }
     }
 }

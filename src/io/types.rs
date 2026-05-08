@@ -12,7 +12,7 @@ pub struct InputState<'a> {
     pub shift_layer: Option<&'a ResolvedLayer>,
     pub shift_trigger_key: Option<u16>,
     pub held_modifiers: SharedModifiers,
-    pub macro_cancel: Option<CancellationToken>,
+    pub macro_cancels: HashMap<u16, CancellationToken>,
     pub pending_releases: HashMap<u16, Action>,
 }
 
@@ -23,7 +23,7 @@ impl<'a> InputState<'a> {
             shift_layer: None,
             shift_trigger_key: None,
             held_modifiers: Arc::new(RwLock::new(HashSet::new())),
-            macro_cancel: None,
+            macro_cancels: HashMap::new(),
             pending_releases: HashMap::new(),
         }
     }
