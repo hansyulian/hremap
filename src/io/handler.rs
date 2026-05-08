@@ -1,129 +1,23 @@
+use super::output::build_output_device;
+use super::types::InputState;
 use crate::actions;
+use crate::utils::{compute_modifier_index, is_modifier_key};
 use anyhow::Result;
 use evdev::{EventType, InputEvent, Key};
 use futures_util::StreamExt;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
-use tokio::sync::RwLock;
 use tokio_stream::StreamMap;
 use tokio_util::sync::CancellationToken;
-mod utils;
 
-use crate::config::{
-    compute_modifier_index, is_modifier_key, Action, Config, KeyCombo, LayerMode, LookupResult,
-    MacroMode, ResolvedLayer,
-};
+use super::emit::emit_combo;
+use super::global::{MacroTx, SharedModifiers};
+use super::input::should_grab;
+use crate::config::{Action, Config, KeyCombo, LayerMode, LookupResult, MacroMode};
 use crate::watcher::WindowInfo;
 
-type SharedModifiers = Arc<RwLock<HashSet<u16>>>;
-type MacroTx = mpsc::UnboundedSender<InputEvent>;
-
-// ─── Input State ─────────────────────────────────────────────────────────────
-
-pub struct InputState<'a> {
-    pub current_layer: &'a ResolvedLayer,
-    pub shift_layer: Option<&'a ResolvedLayer>,
-    pub shift_trigger_key: Option<u16>,
-    pub held_modifiers: SharedModifiers,
-    pub macro_cancel: Option<CancellationToken>,
-    pub pending_releases: HashMap<u16, Action>,
-}
-
-impl<'a> InputState<'a> {
-    pub fn new(default_layer: &'a ResolvedLayer) -> Self {
-        Self {
-            current_layer: default_layer,
-            shift_layer: None,
-            shift_trigger_key: None,
-            held_modifiers: Arc::new(RwLock::new(HashSet::new())),
-            macro_cancel: None,
-            pending_releases: HashMap::new(),
-        }
-    }
-
-    pub fn active_layer(&self) -> &ResolvedLayer {
-        self.shift_layer.unwrap_or(self.current_layer)
-    }
-}
-
-// ─── Device filtering ────────────────────────────────────────────────────────
-
-fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
-    let name = device.name().unwrap_or("").to_lowercase();
-
-    if !device_names.is_empty() {
-        if !device_names
-            .iter()
-            .any(|n| name.contains(&n.to_lowercase()))
-        {
-            return false;
-        }
-    }
-
-    let supported = match device.supported_keys() {
-        Some(keys) => keys,
-        None => return false,
-    };
-
-    if !supported.contains(Key::KEY_A) && !supported.contains(Key::BTN_LEFT) {
-        return false;
-    }
-
-    if let Some(abs) = device.supported_absolute_axes() {
-        if abs.contains(evdev::AbsoluteAxisType::ABS_MT_POSITION_X) {
-            tracing::info!("Skipping touchpad: {}", device.name().unwrap_or("unknown"));
-            return false;
-        }
-    }
-
-    true
-}
-
-// ─── Output helpers ───────────────────────────────────────────────────────────
-
-fn emit_key(output: &mut evdev::uinput::VirtualDevice, code: u16, value: i32) -> Result<()> {
-    output.emit(&[InputEvent::new(EventType::KEY, code, value)])?;
-    Ok(())
-}
-
-fn emit_combo(
-    output: &mut evdev::uinput::VirtualDevice,
-    combo: &KeyCombo,
-    value: i32,
-    held_modifiers: Option<&HashSet<u16>>,
-) -> Result<()> {
-    if value == 1 {
-        if let Some(held) = held_modifiers {
-            for code in held {
-                if !combo.modifiers.iter().any(|m| m.code() == *code) {
-                    emit_key(output, *code, 1)?;
-                }
-            }
-        }
-        for modifier in &combo.modifiers {
-            emit_key(output, modifier.code(), 1)?;
-        }
-        emit_key(output, combo.key.code(), 1)?;
-    } else {
-        emit_key(output, combo.key.code(), 0)?;
-        for modifier in combo.modifiers.iter().rev() {
-            emit_key(output, modifier.code(), 0)?;
-        }
-        if let Some(held) = held_modifiers {
-            for code in held {
-                if !combo.modifiers.iter().any(|m| m.code() == *code) {
-                    emit_key(output, *code, 0)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 // ─── Macro helpers ────────────────────────────────────────────────────────────
-
 async fn run_macro_once(
     tx: &MacroTx,
     steps: &[crate::config::MacroStep],
@@ -219,7 +113,7 @@ fn build_combo_events(
     events
 }
 
-fn stop_macro(state: &mut InputState) {
+fn stop_macro(state: &mut super::types::InputState) {
     if let Some(token) = state.macro_cancel.take() {
         token.cancel();
     }
@@ -404,9 +298,8 @@ async fn handle_action<'a>(
 }
 
 // ─── Main event loop ──────────────────────────────────────────────────────────
-
 pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
-    let mut output = utils::build_output_device()?;
+    let mut output = build_output_device()?;
     let (macro_tx, mut macro_rx) = mpsc::unbounded_channel::<InputEvent>();
 
     let mut streams = grab_devices(&config.device_names);

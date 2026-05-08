@@ -5,7 +5,7 @@ use tokio::process::Command;
 use tokio::sync::watch;
 use zbus::Connection;
 
-use super::WindowInfo;
+use super::types::WindowInfo;
 
 const KWIN_SCRIPT: &str = r#"
 workspace.windowActivated.connect(function(window) {

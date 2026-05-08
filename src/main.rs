@@ -1,6 +1,7 @@
 mod actions;
 mod config;
-mod input;
+mod io;
+mod utils;
 mod watcher;
 
 use tokio::sync::watch;
@@ -73,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     });
 
     tokio::select! {
-        result = input::run(window_rx, cfg) => {
+        result = io::run(window_rx, cfg) => {
             if let Err(e) = result {
                 tracing::error!("Input error: {}", e);
             }

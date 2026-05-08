@@ -4,7 +4,7 @@ use tokio::sync::watch;
 use zbus::proxy;
 use zbus::Connection;
 
-use crate::watcher::WindowInfo;
+use super::types::WindowInfo;
 
 #[proxy(
     interface = "org.gnome.shell.extensions.FocusedWindow",
