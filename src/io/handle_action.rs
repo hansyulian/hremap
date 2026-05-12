@@ -9,25 +9,27 @@ use tokio_util::sync::CancellationToken;
 
 use super::emit::emit_combo;
 use super::global::MacroTx;
-use crate::config::{Action, Config, KeyCombo, LayerMode, MacroMode, MacroStep};
+use crate::config::{
+    LayerMode, MacroMode, RuntimeAction, RuntimeConfig, RuntimeKeyCombo, RuntimeMacroStep,
+};
 use crate::watcher::WindowInfo;
 
 pub async fn handle_action<'a>(
-    action: Action,
+    action: RuntimeAction,
     value: i32,
     key: Key,
     output: &mut evdev::uinput::VirtualDevice,
     tx: &MacroTx,
     state: &mut InputState<'a>,
-    config: &'a Config,
+    config: &'a RuntimeConfig,
     window_rx: &watch::Receiver<Option<WindowInfo>>,
     held_modifiers: Option<&HashSet<u16>>,
 ) -> Result<()> {
     match action {
-        Action::Key(combo) => {
+        RuntimeAction::Key(combo) => {
             emit_combo(output, &combo, value, held_modifiers)?;
         }
-        Action::Layer {
+        RuntimeAction::RuntimeActionLayer {
             layer: layer_name,
             mode,
         } => match mode {
@@ -56,23 +58,23 @@ pub async fn handle_action<'a>(
                 }
             }
         },
-        Action::Volume { direction, amount } => {
+        RuntimeAction::RuntimeActionVolume { direction, amount } => {
             if value == 1 {
                 actions::system_volume(&direction, amount);
             }
         }
-        Action::AppVolume { direction, amount } => {
+        RuntimeAction::RuntimeActionAppVolume { direction, amount } => {
             if value == 1 {
                 let pid = window_rx.borrow().as_ref().map(|w| w.pid);
                 actions::app_volume(&direction, amount, pid);
             }
         }
-        Action::Launch { command } => {
+        RuntimeAction::RuntimeActionLaunch { command } => {
             if value == 1 {
                 actions::launch(&command);
             }
         }
-        Action::Macro { mode, steps } => match mode {
+        RuntimeAction::RuntimeActionMacro { mode, steps } => match mode {
             MacroMode::Once => {
                 if value == 1 {
                     spawn_macro(
@@ -122,7 +124,7 @@ pub async fn handle_action<'a>(
 
 fn spawn_macro(
     tx: MacroTx,
-    steps: Vec<MacroStep>,
+    steps: Vec<RuntimeMacroStep>,
     mode: MacroMode,
     held_modifiers: SharedModifiers,
     key_code: u16,
@@ -161,11 +163,11 @@ fn stop_macro_for_key(state: &mut InputState, key_code: u16) {
 // ─── Macro helpers ────────────────────────────────────────────────────────────
 async fn run_macro_once(
     tx: &MacroTx,
-    steps: &[MacroStep],
+    steps: &[RuntimeMacroStep],
     cancel: &CancellationToken,
     held_modifiers: &SharedModifiers,
 ) {
-    let mut pressed: Vec<KeyCombo> = vec![];
+    let mut pressed: Vec<RuntimeKeyCombo> = vec![];
 
     for step in steps {
         if cancel.is_cancelled() {
@@ -219,7 +221,7 @@ async fn run_macro_once(
 
 /// Build the list of InputEvents for a combo without needing the device directly.
 fn build_combo_events(
-    combo: &KeyCombo,
+    combo: &RuntimeKeyCombo,
     value: i32,
     held_modifiers: Option<&HashSet<u16>>,
 ) -> Vec<InputEvent> {

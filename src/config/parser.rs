@@ -1,13 +1,15 @@
 use crate::utils::is_modifier_key;
 
 use super::raw::{RawAction, RawConfig, RawLayer};
-use super::resolved::{Action, Config, KeyCombo, LayerMappings, MacroStep, ResolvedLayer};
+use super::runtime::{
+    RuntimeAction, RuntimeConfig, RuntimeKeyCombo, RuntimeLayer, RuntimeMacroStep, RuntimeMappings,
+};
 use super::utils::parse_key;
 use anyhow::{bail, Result};
 use evdev::Key;
 use std::collections::HashMap;
 
-fn parse_combo(keys: &[String]) -> Result<KeyCombo> {
+fn parse_combo(keys: &[String]) -> Result<RuntimeKeyCombo> {
     if keys.is_empty() {
         bail!("Empty key combo");
     }
@@ -28,7 +30,7 @@ fn parse_combo(keys: &[String]) -> Result<KeyCombo> {
         Some(k) => k,
         None => bail!("No main key in combo: {:?}", keys),
     };
-    Ok(KeyCombo { modifiers, key })
+    Ok(RuntimeKeyCombo { modifiers, key })
 }
 
 fn parse_trigger(keys: &[String]) -> Result<(u16, usize)> {
@@ -62,38 +64,38 @@ fn parse_trigger(keys: &[String]) -> Result<(u16, usize)> {
     Ok((key.code(), modifier_index))
 }
 
-fn resolve_action(raw: &RawAction) -> Result<Action> {
+fn resolve_action(raw: &RawAction) -> Result<RuntimeAction> {
     match raw {
-        RawAction::Key { keys } => Ok(Action::Key(parse_combo(keys)?)),
+        RawAction::Key { keys } => Ok(RuntimeAction::Key(parse_combo(keys)?)),
         RawAction::Macro { mode, steps } => {
             let resolved_steps = steps
                 .iter()
                 .map(|s| {
-                    Ok(MacroStep {
+                    Ok(RuntimeMacroStep {
                         combo: parse_combo(&s.keys)?,
                         delay_ms: s.delay_ms,
                         up: s.up,
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            Ok(Action::Macro {
+            Ok(RuntimeAction::RuntimeActionMacro {
                 mode: mode.clone(),
                 steps: resolved_steps,
             })
         }
-        RawAction::Layer { layer, mode } => Ok(Action::Layer {
+        RawAction::Layer { layer, mode } => Ok(RuntimeAction::RuntimeActionLayer {
             layer: layer.clone(),
             mode: mode.clone(),
         }),
-        RawAction::Volume { direction, amount } => Ok(Action::Volume {
+        RawAction::Volume { direction, amount } => Ok(RuntimeAction::RuntimeActionVolume {
             direction: direction.clone(),
             amount: *amount,
         }),
-        RawAction::AppVolume { direction, amount } => Ok(Action::AppVolume {
+        RawAction::AppVolume { direction, amount } => Ok(RuntimeAction::RuntimeActionAppVolume {
             direction: direction.clone(),
             amount: *amount,
         }),
-        RawAction::Launch { command } => Ok(Action::Launch {
+        RawAction::Launch { command } => Ok(RuntimeAction::RuntimeActionLaunch {
             command: command.clone(),
         }),
     }
@@ -102,8 +104,8 @@ fn resolve_action(raw: &RawAction) -> Result<Action> {
 fn resolve_layer(
     name: &str,
     raw_layers: &HashMap<String, RawLayer>,
-    cache: &mut HashMap<String, LayerMappings>,
-) -> Result<LayerMappings> {
+    cache: &mut HashMap<String, RuntimeMappings>,
+) -> Result<RuntimeMappings> {
     if let Some(cached) = cache.get(name) {
         return Ok(cached.clone());
     }
@@ -114,7 +116,7 @@ fn resolve_layer(
     };
 
     // start with parent mappings
-    let mut mappings: LayerMappings = if let Some(parent) = &raw.parent {
+    let mut mappings: RuntimeMappings = if let Some(parent) = &raw.parent {
         resolve_layer(parent, raw_layers, cache)?
     } else {
         HashMap::new()
@@ -135,18 +137,18 @@ fn resolve_layer(
     Ok(mappings)
 }
 
-pub fn load(path: &str) -> Result<Config> {
+pub fn load(path: &str) -> Result<RuntimeConfig> {
     let content = std::fs::read_to_string(path)?;
     let raw: RawConfig = serde_yaml::from_str(&content)?;
 
-    let mut cache: HashMap<String, LayerMappings> = HashMap::new();
-    let mut layers: HashMap<String, ResolvedLayer> = HashMap::new();
+    let mut cache: HashMap<String, RuntimeMappings> = HashMap::new();
+    let mut layers: HashMap<String, RuntimeLayer> = HashMap::new();
 
     for name in raw.layers.keys() {
         let mappings = resolve_layer(name, &raw.layers, &mut cache)?;
         layers.insert(
             name.clone(),
-            ResolvedLayer {
+            RuntimeLayer {
                 name: name.clone(),
                 mappings,
             },
@@ -160,7 +162,7 @@ pub fn load(path: &str) -> Result<Config> {
         }
     }
 
-    Ok(Config {
+    Ok(RuntimeConfig {
         layers,
         profile_map,
         default_layer: raw.default_layer,

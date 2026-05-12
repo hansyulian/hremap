@@ -1,4 +1,4 @@
-use crate::config::KeyCombo;
+use crate::config::RuntimeKeyCombo;
 use anyhow::Result;
 use evdev::{EventType, InputEvent};
 use std::collections::HashSet;
@@ -10,7 +10,7 @@ fn emit_key(output: &mut evdev::uinput::VirtualDevice, code: u16, value: i32) ->
 
 pub fn emit_combo(
     output: &mut evdev::uinput::VirtualDevice,
-    combo: &KeyCombo,
+    combo: &RuntimeKeyCombo,
     value: i32,
     held_modifiers: Option<&HashSet<u16>>,
 ) -> Result<()> {

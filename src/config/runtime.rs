@@ -8,56 +8,56 @@ use std::collections::HashMap;
 // ─── Resolved structs ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone)]
-pub struct KeyCombo {
+pub struct RuntimeKeyCombo {
     pub modifiers: Vec<Key>,
     pub key: Key,
 }
 
 #[derive(Debug, Clone)]
-pub struct MacroStep {
-    pub combo: KeyCombo,
+pub struct RuntimeMacroStep {
+    pub combo: RuntimeKeyCombo,
     pub delay_ms: u64,
     pub up: bool,
 }
 
 #[derive(Debug, Clone)]
-pub enum Action {
-    Key(KeyCombo),
-    Macro {
+pub enum RuntimeAction {
+    Key(RuntimeKeyCombo),
+    RuntimeActionMacro {
         mode: MacroMode,
-        steps: Vec<MacroStep>,
+        steps: Vec<RuntimeMacroStep>,
     },
-    Layer {
+    RuntimeActionLayer {
         layer: String,
         mode: LayerMode,
     },
-    Volume {
+    RuntimeActionVolume {
         direction: VolumeDirection,
         amount: f32,
     },
-    AppVolume {
+    RuntimeActionAppVolume {
         direction: VolumeDirection,
         amount: f32,
     },
-    Launch {
+    RuntimeActionLaunch {
         command: String,
     },
 }
 
 // key code → [Option<Action>; 8] (indexed by modifier bitmask)
-pub type LayerMappings = HashMap<u16, [Option<Action>; MODIFIER_COUNT]>;
+pub type RuntimeMappings = HashMap<u16, [Option<RuntimeAction>; MODIFIER_COUNT]>;
 
 #[derive(Debug)]
-pub struct ResolvedLayer {
+pub struct RuntimeLayer {
     pub name: String,
-    pub mappings: LayerMappings,
+    pub mappings: RuntimeMappings,
 }
 pub enum LookupResult<'a> {
-    Exact(&'a Action),
-    Fallback(&'a Action),
+    Exact(&'a RuntimeAction),
+    Fallback(&'a RuntimeAction),
 }
 
-impl ResolvedLayer {
+impl RuntimeLayer {
     pub fn lookup(&self, key_code: u16, modifier_index: usize) -> Option<LookupResult> {
         self.mappings.get(&key_code).and_then(|arr| {
             if let Some(action) = arr[modifier_index].as_ref() {
@@ -72,8 +72,8 @@ impl ResolvedLayer {
 }
 
 #[derive(Debug)]
-pub struct Config {
-    pub layers: HashMap<String, ResolvedLayer>,
+pub struct RuntimeConfig {
+    pub layers: HashMap<String, RuntimeLayer>,
     pub profile_map: HashMap<String, String>,
     pub default_layer: String,
     pub device_names: Vec<String>,

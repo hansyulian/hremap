@@ -12,11 +12,14 @@ use tokio_stream::StreamMap;
 use super::handle_action::handle_action;
 use super::input::should_grab;
 use super::utils::should_skip_event_on_action;
-use crate::config::{Config, LookupResult};
+use crate::config::{LookupResult, RuntimeConfig};
 use crate::watcher::WindowInfo;
 
 // ─── Main event loop ──────────────────────────────────────────────────────────
-pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Config) -> Result<()> {
+pub async fn run(
+    mut window_rx: watch::Receiver<Option<WindowInfo>>,
+    config: RuntimeConfig,
+) -> Result<()> {
     let mut output = build_output_device()?;
     let (macro_tx, mut macro_rx) = mpsc::unbounded_channel::<InputEvent>();
 
@@ -151,7 +154,7 @@ pub async fn run(mut window_rx: watch::Receiver<Option<WindowInfo>>, config: Con
 
 // ─── Layer helpers ────────────────────────────────────────────────────────────
 fn update_base_layer<'a>(
-    config: &'a Config,
+    config: &'a RuntimeConfig,
     state: &mut InputState<'a>,
     window: &Option<WindowInfo>,
 ) {
