@@ -14,8 +14,15 @@ const IFACE = `
   </interface>
 </node>`;
 
+const defaultWindowInfoJSON = JSON.stringify({
+    title: '',
+    wm_class: '',
+    wm_class_instance: '',
+    pid: 0,
+});
+
 function getWindowInfo(win) {
-    if (!win) return null;
+    if (!win) return defaultWindowInfoJSON;
     try {
         return JSON.stringify({
             title: win.get_title() ?? '',
@@ -24,8 +31,9 @@ function getWindowInfo(win) {
             pid: win.get_pid(),
         });
     } catch {
-        return null;
+        return defaultWindowInfoJSON;
     }
+    return defaultWindowInfoJSON;
 }
 
 class FocusedWindowDBus {
@@ -43,9 +51,7 @@ class FocusedWindowDBus {
     _onFocusChanged() {
         const win = global.display.focus_window;
         const json = getWindowInfo(win);
-        if (json) {
-            this._dbusImpl.emit_signal('FocusChanged', new GLib.Variant('(s)', [json]));
-        }
+        this._dbusImpl.emit_signal('FocusChanged', new GLib.Variant('(s)', [json]));
     }
 
     destroy() {

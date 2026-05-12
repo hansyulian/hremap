@@ -1,6 +1,9 @@
 use anyhow::{bail, Result};
 use evdev::Key;
 
+pub const WHEEL_UP: Key = Key::new(254);
+pub const WHEEL_DOWN: Key = Key::new(255);
+
 pub fn parse_key(name: &str) -> Result<Key> {
     let key = match name.to_uppercase().as_str() {
         "A" => Key::KEY_A,
@@ -126,6 +129,8 @@ pub fn parse_key(name: &str) -> Result<Key> {
         "NUMPAD_DOT" => Key::KEY_KPDOT,
         "NUMPAD_ENTER" => Key::KEY_KPENTER,
         "NUMPAD_SLASH" => Key::KEY_KPSLASH,
+        "WHEEL_DOWN" => WHEEL_DOWN,
+        "WHEEL_UP" => WHEEL_UP,
         _ => bail!("Unknown key name: {}", name),
     };
     Ok(key)
