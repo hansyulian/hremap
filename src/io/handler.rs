@@ -91,11 +91,17 @@ pub async fn run(
                     update_base_layer(&config, &mut state, &active_window);
                 }
 
-                if value == 0 && state.shift_trigger_key == Some(key.code()) {
-                    tracing::info!("Shift trigger released");
-                    state.shift_layer = None;
-                    state.shift_trigger_key = None;
-                    continue;
+                if state.shift_trigger_key == Some(key.code()){
+                    match value {
+                        0 => {
+                            tracing::info!("Shift trigger released");
+                            state.shift_layer = None;
+                            state.shift_trigger_key = None;
+                        }
+                        _ => {
+                            continue;
+                        }
+                    }
                 }
 
                 // ─── Key up ───────────────────────────────────────────────
