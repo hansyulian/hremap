@@ -14,19 +14,20 @@ pub fn emit_combo(
     value: i32,
     held_modifiers: Option<&HashSet<u16>>,
 ) -> Result<()> {
-    if value == 1 {
+    if value != 0 {
         if let Some(held) = held_modifiers {
             for code in held {
                 if !combo.modifiers.iter().any(|m| m.code() == *code) {
-                    emit_key(output, *code, 1)?;
+                    emit_key(output, *code, value)?;
                 }
             }
         }
         for modifier in &combo.modifiers {
-            emit_key(output, modifier.code(), 1)?;
+            emit_key(output, modifier.code(), value)?;
         }
-        emit_key(output, combo.key.code(), 1)?;
+        emit_key(output, combo.key.code(), value)?;
     } else {
+        // reverse the execution sequence
         emit_key(output, combo.key.code(), 0)?;
         for modifier in combo.modifiers.iter().rev() {
             emit_key(output, modifier.code(), 0)?;
