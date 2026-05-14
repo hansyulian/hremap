@@ -25,53 +25,28 @@ fn detect_de() -> &'static str {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
-    tracing::info!("hremap starting...");
+    tracing::debug!("hremap starting...");
 
     let config_path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "config.yaml".to_string());
 
-    tracing::info!("Loading config from: {}", config_path);
+    tracing::debug!("Loading config from: {}", config_path);
 
     let cfg = config::load(&config_path)?;
-    tracing::info!(
+    tracing::debug!(
         "Config loaded: {} layers, {} profiles",
         cfg.layers.len(),
         cfg.profile_map.len()
     );
 
     let (window_tx, window_rx) = watch::channel(None);
-    let window_rx_printer = window_rx.clone();
 
     let de = detect_de();
-    tracing::info!("Detected desktop environment: {}", de);
-
-    tokio::spawn(async move {
-        let result = match de {
-            "kde" => watcher::kde::watch(window_tx).await,
-            "gnome" => watcher::gnome::watch(window_tx).await,
-            _ => Err(anyhow::anyhow!("Unsupported desktop environment: {}", de)),
-        };
-        if let Err(e) = result {
-            tracing::error!("Watcher error: {}", e);
-        }
-    });
-
-    tokio::spawn(async move {
-        let mut rx = window_rx_printer;
-        loop {
-            rx.changed().await.ok();
-            if let Some(win) = rx.borrow().clone() {
-                println!(
-                    "[Active Window] class=\"{}\" title=\"{}\" pid={}",
-                    win.wm_class, win.title, win.pid
-                );
-            }
-        }
-    });
+    tracing::debug!("Detected desktop environment: {}", de);
 
     tokio::select! {
         result = io::run(window_rx, cfg) => {
@@ -79,11 +54,22 @@ async fn main() -> anyhow::Result<()> {
                 tracing::error!("Input error: {}", e);
             }
         }
+        result = async move {
+            match de {
+                "kde" => watcher::kde::watch(window_tx).await,
+                "gnome" => watcher::gnome::watch(window_tx).await,
+                _ => Err(anyhow::anyhow!("Unsupported DE: {}", de)),
+            }
+        } => {
+            if let Err(e) = result {
+                tracing::error!("Watcher error: {}", e);
+            }
+        }
         _ = tokio::signal::ctrl_c() => {
             tracing::info!("Ctrl+C received, ungrabbing devices...");
         }
     }
 
-    tracing::info!("Devices ungrabbed, exiting cleanly.");
+    tracing::debug!("Devices ungrabbed, exiting cleanly.");
     Ok(())
 }

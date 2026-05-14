@@ -1,5 +1,4 @@
 pub(crate) mod emit;
-pub(crate) mod global;
 pub(crate) mod handle_action;
 pub mod handler;
 pub(crate) mod input;

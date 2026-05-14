@@ -39,7 +39,7 @@ fn ensure_script() -> anyhow::Result<PathBuf> {
     if current != KWIN_SCRIPT {
         std::fs::create_dir_all(path.parent().unwrap())?;
         std::fs::write(&path, KWIN_SCRIPT)?;
-        tracing::info!("KWin script written to: {}", path.display());
+        tracing::debug!("KWin script written to: {}", path.display());
     } else {
         tracing::debug!("KWin script already up to date at: {}", path.display());
     }
@@ -106,7 +106,7 @@ async fn load_kwin_script() -> anyhow::Result<()> {
     )
     .await?;
 
-    tracing::info!("KWin script loaded and running (id={script_id}).");
+    tracing::debug!("KWin script loaded and running (id={script_id}).");
     Ok(())
 }
 
@@ -136,7 +136,7 @@ pub async fn watch(tx: watch::Sender<Option<WindowInfo>>) -> anyhow::Result<()> 
     let stdout = child.stdout.take().unwrap();
     let mut lines = BufReader::new(stdout).lines();
 
-    tracing::info!("KDE watcher ready.");
+    tracing::debug!("KDE watcher ready.");
 
     let mut caption = String::new();
     let mut resource_class = String::new();

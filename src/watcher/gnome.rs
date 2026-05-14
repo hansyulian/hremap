@@ -25,7 +25,7 @@ pub async fn watch(tx: watch::Sender<Option<WindowInfo>>) -> Result<()> {
     // get current window immediately on startup
     if let Ok(json) = proxy.get().await {
         if let Ok(info) = serde_json::from_str::<WindowInfo>(&json) {
-            tracing::info!("Initial window: {:?}", info);
+            tracing::debug!("Initial window: {:?}", info);
             let _ = tx.send(Some(info));
         }
     }
@@ -33,12 +33,12 @@ pub async fn watch(tx: watch::Sender<Option<WindowInfo>>) -> Result<()> {
     // subscribe to focus changes
     let mut stream = proxy.receive_focus_changed().await?;
 
-    tracing::info!("GNOME watcher listening for focus changes...");
+    tracing::debug!("GNOME watcher listening for focus changes...");
 
     while let Some(signal) = stream.next().await {
         if let Ok(args) = signal.args() {
             if let Ok(info) = serde_json::from_str::<WindowInfo>(&args.window) {
-                tracing::info!("Window changed: {:?}", info);
+                tracing::debug!("Window changed: {:?}", info);
                 let _ = tx.send(Some(info));
             }
         }

@@ -1,11 +1,56 @@
 use anyhow::Result;
-use evdev::{AbsInfo, AbsoluteAxisType, Key, UinputAbsSetup};
+use evdev::{uinput::VirtualDevice, EventType, InputEvent, Key};
 
-// ─── Build virtual output device ─────────────────────────────────────────────
+pub struct VirtualOutputDevice {
+    keyboard: VirtualDevice,
+    mouse: VirtualDevice,
+}
 
-pub fn build_output_device() -> Result<evdev::uinput::VirtualDevice> {
+impl VirtualOutputDevice {
+    pub fn new() -> Result<Self> {
+        Ok(Self {
+            keyboard: build_virtual_keyboard_output_device()?,
+            mouse: build_virtual_mouse_output_device()?,
+        })
+    }
+
+    pub fn emit(&mut self, events: &[InputEvent]) -> Result<()> {
+        let mut keyboard_events: Vec<InputEvent> = Vec::new();
+        let mut mouse_events: Vec<InputEvent> = Vec::new();
+
+        for ev in events {
+            if is_mouse_event(ev) {
+                mouse_events.push(*ev);
+            } else {
+                keyboard_events.push(*ev);
+            }
+        }
+
+        if !keyboard_events.is_empty() {
+            self.keyboard.emit(&keyboard_events)?;
+        }
+        if !mouse_events.is_empty() {
+            self.mouse.emit(&mouse_events)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn is_mouse_event(ev: &InputEvent) -> bool {
+    match ev.event_type() {
+        EventType::RELATIVE => true,
+        EventType::KEY => matches!(
+            Key::new(ev.code()),
+            Key::BTN_LEFT | Key::BTN_RIGHT | Key::BTN_MIDDLE | Key::BTN_SIDE | Key::BTN_EXTRA
+        ),
+        _ => false,
+    }
+}
+
+pub fn build_virtual_keyboard_output_device() -> Result<evdev::uinput::VirtualDevice> {
     Ok(evdev::uinput::VirtualDeviceBuilder::new()?
-        .name("hremap-virtual")
+        .name("HRemap Virtual Keyboard")
         .with_keys(&evdev::AttributeSet::from_iter([
             Key::KEY_A,
             Key::KEY_B,
@@ -107,11 +152,6 @@ pub fn build_output_device() -> Result<evdev::uinput::VirtualDevice> {
             Key::KEY_VOLUMEUP,
             Key::KEY_VOLUMEDOWN,
             Key::KEY_MUTE,
-            Key::BTN_LEFT,
-            Key::BTN_RIGHT,
-            Key::BTN_MIDDLE,
-            Key::BTN_SIDE,
-            Key::BTN_EXTRA,
             Key::KEY_KP0,
             Key::KEY_KP1,
             Key::KEY_KP2,
@@ -130,15 +170,20 @@ pub fn build_output_device() -> Result<evdev::uinput::VirtualDevice> {
             Key::KEY_KPSLASH,
             Key::KEY_NUMLOCK,
             Key::KEY_SCROLLLOCK,
-            Key::KEY_PAUSE,
             Key::KEY_RIGHTMETA,
-            Key::KEY_STOPCD,
-            Key::KEY_EJECTCD,
-            Key::KEY_CALC,
-            Key::KEY_SLEEP,
-            Key::KEY_WAKEUP,
-            Key::KEY_BRIGHTNESSUP,
-            Key::KEY_BRIGHTNESSDOWN,
+        ]))?
+        .build()?)
+}
+
+pub fn build_virtual_mouse_output_device() -> Result<evdev::uinput::VirtualDevice> {
+    Ok(evdev::uinput::VirtualDeviceBuilder::new()?
+        .name("HRemap Virtual Mouse")
+        .with_keys(&evdev::AttributeSet::from_iter([
+            Key::BTN_LEFT,
+            Key::BTN_RIGHT,
+            Key::BTN_MIDDLE,
+            Key::BTN_SIDE,
+            Key::BTN_EXTRA,
         ]))?
         .with_relative_axes(&evdev::AttributeSet::from_iter([
             evdev::RelativeAxisType::REL_X,
@@ -148,13 +193,5 @@ pub fn build_output_device() -> Result<evdev::uinput::VirtualDevice> {
             evdev::RelativeAxisType::REL_WHEEL_HI_RES,
             evdev::RelativeAxisType::REL_HWHEEL_HI_RES,
         ]))?
-        .with_absolute_axis(&UinputAbsSetup::new(
-            AbsoluteAxisType::ABS_X,
-            AbsInfo::new(0, 0, 65535, 0, 0, 1),
-        ))?
-        .with_absolute_axis(&UinputAbsSetup::new(
-            AbsoluteAxisType::ABS_Y,
-            AbsInfo::new(0, 0, 65535, 0, 0, 1),
-        ))?
         .build()?)
 }

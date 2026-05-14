@@ -1,15 +1,15 @@
-use crate::config::RuntimeKeyCombo;
+use crate::{config::RuntimeKeyCombo, io::output::VirtualOutputDevice};
 use anyhow::Result;
 use evdev::{EventType, InputEvent};
 use std::collections::HashSet;
 
-fn emit_key(output: &mut evdev::uinput::VirtualDevice, code: u16, value: i32) -> Result<()> {
+fn emit_key(output: &mut VirtualOutputDevice, code: u16, value: i32) -> Result<()> {
     output.emit(&[InputEvent::new(EventType::KEY, code, value)])?;
     Ok(())
 }
 
 pub fn emit_combo(
-    output: &mut evdev::uinput::VirtualDevice,
+    output: &mut VirtualOutputDevice,
     combo: &RuntimeKeyCombo,
     value: i32,
     held_modifiers: Option<&HashSet<u16>>,

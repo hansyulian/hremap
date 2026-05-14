@@ -1,6 +1,6 @@
 use super::types::InputState;
 use crate::actions;
-use crate::io::global::SharedModifiers;
+use crate::io::output::VirtualOutputDevice;
 use anyhow::Result;
 use evdev::{EventType, InputEvent, Key};
 use std::collections::{HashMap, HashSet};
@@ -8,7 +8,7 @@ use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
 
 use super::emit::emit_combo;
-use super::global::MacroTx;
+use super::types::MacroTx;
 use crate::config::{
     LayerMode, MacroMode, RuntimeAction, RuntimeConfig, RuntimeKeyCombo, RuntimeMacroStep,
 };
@@ -18,7 +18,7 @@ pub async fn handle_action<'a>(
     action: RuntimeAction,
     value: i32,
     key: Key,
-    output: &mut evdev::uinput::VirtualDevice,
+    output: &mut VirtualOutputDevice,
     tx: &MacroTx,
     state: &mut InputState<'a>,
     config: &'a RuntimeConfig,
@@ -36,12 +36,12 @@ pub async fn handle_action<'a>(
             LayerMode::Shift => {
                 if value == 1 {
                     if let Some(l) = config.layers.get(&layer_name) {
-                        tracing::info!("Shift layer on: {}", layer_name);
+                        tracing::debug!("Shift layer on: {}", layer_name);
                         state.shift_layer = Some(l);
                         state.shift_trigger_key = Some(key.code());
                     }
                 } else if value == 0 {
-                    tracing::info!("Shift layer off");
+                    tracing::debug!("Shift layer off");
                     state.shift_layer = None;
                     state.shift_trigger_key = None;
                 }
@@ -49,10 +49,10 @@ pub async fn handle_action<'a>(
             LayerMode::Toggle => {
                 if value == 1 {
                     if state.shift_layer.map(|l| l.name.as_str()) == Some(layer_name.as_str()) {
-                        tracing::info!("Toggle layer off: {}", layer_name);
+                        tracing::debug!("Toggle layer off: {}", layer_name);
                         state.shift_layer = None;
                     } else if let Some(l) = config.layers.get(&layer_name) {
-                        tracing::info!("Toggle layer on: {}", layer_name);
+                        tracing::debug!("Toggle layer on: {}", layer_name);
                         state.shift_layer = Some(l);
                     }
                 }
@@ -126,7 +126,7 @@ fn spawn_macro(
     tx: MacroTx,
     steps: Vec<RuntimeMacroStep>,
     mode: MacroMode,
-    held_modifiers: SharedModifiers,
+    held_modifiers: HashSet<u16>,
     key_code: u16,
     cancels: &mut HashMap<u16, CancellationToken>,
 ) {
@@ -165,7 +165,7 @@ async fn run_macro_once(
     tx: &MacroTx,
     steps: &[RuntimeMacroStep],
     cancel: &CancellationToken,
-    held_modifiers: &SharedModifiers,
+    held_modifiers: &HashSet<u16>,
 ) {
     let mut pressed: Vec<RuntimeKeyCombo> = vec![];
 
@@ -174,7 +174,7 @@ async fn run_macro_once(
             break;
         }
 
-        let held_snapshot = held_modifiers.read().await.clone();
+        let held_snapshot = held_modifiers.clone();
         let held = if held_snapshot.is_empty() {
             None
         } else {
@@ -184,7 +184,7 @@ async fn run_macro_once(
         let events = build_combo_events(&step.combo, if step.up { 0 } else { 1 }, held.as_ref());
 
         for ev in events {
-            if tx.send(ev).is_err() {
+            if tx.send(ev).await.is_err() {
                 return;
             }
         }
@@ -203,7 +203,7 @@ async fn run_macro_once(
         }
     }
 
-    let held_snapshot = held_modifiers.read().await.clone();
+    let held_snapshot = held_modifiers.clone();
     let held = if held_snapshot.is_empty() {
         None
     } else {
@@ -212,7 +212,7 @@ async fn run_macro_once(
     for combo in pressed.iter().rev() {
         let events = build_combo_events(combo, 0, held.as_ref());
         for ev in events {
-            if tx.send(ev).is_err() {
+            if tx.send(ev).await.is_err() {
                 return;
             }
         }

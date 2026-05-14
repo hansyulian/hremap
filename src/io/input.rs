@@ -4,18 +4,17 @@ use crate::config::utils::{WHEEL_DOWN, WHEEL_UP};
 
 pub fn should_passthrough(event: &InputEvent) -> bool {
     if event.event_type() == EventType::KEY {
-        return false;
+        return false; // handled by remapper
     }
-    if event.event_type() == EventType::RELATIVE
-        && (event.code() == RelativeAxisType::REL_WHEEL.0
-            || event.code() == RelativeAxisType::REL_WHEEL_HI_RES.0)
-    {
-        return false;
+    if event.event_type() == EventType::RELATIVE {
+        return match event.code() {
+            c if c == RelativeAxisType::REL_WHEEL.0 => false, // handled (scroll)
+            c if c == RelativeAxisType::REL_WHEEL_HI_RES.0 => false, // handled
+            _ => true, // REL_X, REL_Y etc → passthrough but DON'T re-emit
+        };
     }
-
-    return true;
+    true
 }
-
 pub fn resolve_key(event: &InputEvent) -> Key {
     if event.event_type() == EventType::RELATIVE
         && (event.code() == RelativeAxisType::REL_WHEEL.0
@@ -65,7 +64,7 @@ pub fn should_grab(device: &evdev::Device, device_names: &[String]) -> bool {
 
     if let Some(abs) = device.supported_absolute_axes() {
         if abs.contains(evdev::AbsoluteAxisType::ABS_MT_POSITION_X) {
-            tracing::info!("Skipping touchpad: {}", device.name().unwrap_or("unknown"));
+            tracing::debug!("Skipping touchpad: {}", device.name().unwrap_or("unknown"));
             return false;
         }
     }
